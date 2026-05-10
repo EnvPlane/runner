@@ -1,0 +1,20 @@
+# Local env
+.env
+.env.*
+
+# Build/test artifacts
+.cache/
+bin/
+*.test
+*.out
+coverage.*
+*.coverprofile
+profile.cov
+
+# Packaged releases
+*.tgz
+
+# OS/editor
+.DS_Store
+.idea/
+.vscode/

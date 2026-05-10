@@ -1,0 +1,475 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"io"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"envpilot/agent"
+	"envpilot/internal/domain"
+)
+
+type fakeCapabilitySource struct {
+	capabilities agent.ClusterCapabilities
+	err          error
+}
+
+func (s fakeCapabilitySource) DiscoverCapabilities(context.Context) (agent.ClusterCapabilities, error) {
+	if s.err != nil {
+		return agent.ClusterCapabilities{}, s.err
+	}
+	return s.capabilities, nil
+}
+
+func TestDiscoverAgentCapabilitiesRequiredRejectsMissingCoreV1(t *testing.T) {
+	_, err := discoverAgentCapabilitiesRequired(context.Background(), fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{Capabilities: []string{"apps-v1", "flux-helm-v2"}},
+	})
+	if err == nil {
+		t.Fatal("expected missing core-v1 capability error")
+	}
+}
+
+func TestDiscoverAgentCapabilitiesRequiredAllowsCoreV1(t *testing.T) {
+	caps, err := discoverAgentCapabilitiesRequired(context.Background(), fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{Capabilities: []string{"apps-v1", "core-v1", "flux-helm-v2"}},
+	})
+	if err != nil {
+		t.Fatalf("discover capabilities: %v", err)
+	}
+	if !hasCapability(caps.Capabilities, "core-v1") {
+		t.Fatalf("expected core-v1 in discovered capabilities: %#v", caps.Capabilities)
+	}
+}
+
+func TestProjectInitCreatesBasicConfig(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "envpilot-project.json")
+	configPath, project := projectInitConfig([]string{
+		"--path", path,
+		"--id", "checkout",
+		"--name", "Checkout",
+		"--product", "bethunder",
+		"--base-namespace", "feature",
+	})
+	if configPath != path {
+		t.Fatalf("path = %q", configPath)
+	}
+	if err := writeProjectInitConfig(configPath, project); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	var saved domain.Project
+	if err := json.Unmarshal(raw, &saved); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if saved.ID != "checkout" || saved.Name != "Checkout" || saved.ProductID != "bethunder" {
+		t.Fatalf("project = %+v", saved)
+	}
+	if saved.BaseEnvConfig.Namespace != "feature" {
+		t.Fatalf("base namespace = %q", saved.BaseEnvConfig.Namespace)
+	}
+	if saved.GitRepo.DefaultBranch != "main" || saved.GitOpsRepo.Path == "" {
+		t.Fatalf("repo defaults = %+v %+v", saved.GitRepo, saved.GitOpsRepo)
+	}
+}
+
+func TestEnvCLIListDeleteAndLogs(t *testing.T) {
+	var deleteCalled bool
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/environments":
+			_ = json.NewEncoder(w).Encode([]domain.Environment{{
+				ID:              "pr-123",
+				Status:          domain.StatusReady,
+				URL:             "https://pr-123.checkout.preview.local",
+				CostEstimateDay: "~ €0.60/day",
+				UpdatedAt:       time.Date(2026, 5, 2, 10, 0, 0, 0, time.UTC),
+			}})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/environments/pr-123":
+			deleteCalled = true
+			_ = json.NewEncoder(w).Encode(domain.Environment{ID: "pr-123", Status: domain.StatusTerminating})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/environments/pr-123/events":
+			_ = json.NewEncoder(w).Encode(map[string]any{"events": []domain.KubernetesEvent{{
+				Type:         "Warning",
+				Reason:       "FailedScheduling",
+				InvolvedName: "api-123",
+				Message:      "pod pending",
+			}}})
+		default:
+			t.Fatalf("unexpected request %s %s", r.Method, r.URL.Path)
+		}
+	})
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen test server: %v", err)
+	}
+	server := &httptest.Server{
+		Listener: listener,
+		Config:   &http.Server{Handler: handler},
+	}
+	server.Start()
+	defer server.Close()
+
+	var list bytes.Buffer
+	if err := runEnvCommand(context.Background(), []string{"list", "--api", server.URL}, &list); err != nil {
+		t.Fatalf("env list: %v", err)
+	}
+	if !strings.Contains(list.String(), "pr-123\tready\thttps://pr-123.checkout.preview.local\t~ €0.60/day") {
+		t.Fatalf("list output = %q", list.String())
+	}
+
+	var deleted bytes.Buffer
+	if err := runEnvCommand(context.Background(), []string{"delete", "pr-123", "--api", server.URL}, &deleted); err != nil {
+		t.Fatalf("env delete: %v", err)
+	}
+	if !deleteCalled || !strings.Contains(deleted.String(), "pr-123\tterminating") {
+		t.Fatalf("delete called=%v output=%q", deleteCalled, deleted.String())
+	}
+
+	var logs bytes.Buffer
+	if err := runEnvCommand(context.Background(), []string{"logs", "pr-123", "--api", server.URL}, &logs); err != nil {
+		t.Fatalf("env logs: %v", err)
+	}
+	if !strings.Contains(logs.String(), "Warning\tFailedScheduling\tapi-123\tpod pending") {
+		t.Fatalf("logs output = %q", logs.String())
+	}
+}
+
+func TestRunAgentInstallCheckFlow(t *testing.T) {
+	var register domain.AgentRegistrationRequest
+	var heartbeat domain.AgentHeartbeatRequest
+	requests := 0
+
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.URL.Path {
+		case "/api/v1/agents/register":
+			if err := json.NewDecoder(r.Body).Decode(&register); err != nil {
+				t.Fatalf("decode register request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"dev-us","name":"dev-us","provider":"kubernetes","agentAuthToken":"agent-install-auth-token"}`))
+			return
+		case "/api/v1/agents/heartbeat":
+			if err := json.NewDecoder(r.Body).Decode(&heartbeat); err != nil {
+				t.Fatalf("decode heartbeat request: %v", err)
+			}
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer controlPlane.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:   controlPlane.URL,
+		ClusterID:         "dev-us",
+		AgentID:           "agent-install-check",
+		AgentVersion:      "test",
+		HeartbeatInterval: 30 * time.Second,
+		ReportTimeout:     5 * time.Second,
+	}
+	source := fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{
+			KubernetesVersion: "v1.30.1",
+			Capabilities:      []string{"core-v1", "apps-v1", "flux-helm-v2"},
+		},
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+
+	_, err := runAgentInstallCheckFlow(context.Background(), cfg, source, reporter)
+	if err != nil {
+		t.Fatalf("runAgentInstallCheckFlow: %v", err)
+	}
+	if requests != 2 {
+		t.Fatalf("expected 2 requests, got %d", requests)
+	}
+	if register.ClusterID != "dev-us" || register.AgentID != "agent-install-check" {
+		t.Fatalf("invalid register payload: %#v", register)
+	}
+	if heartbeat.ClusterID != "dev-us" || heartbeat.Status != "online" {
+		t.Fatalf("invalid heartbeat payload: %#v", heartbeat)
+	}
+	if heartbeat.AgentAuthToken != "agent-install-auth-token" {
+		t.Fatalf("invalid heartbeat auth token: %#v", heartbeat)
+	}
+}
+
+func TestRunAgentInstallCheckFlowPersistsIssuedAgentAuthToken(t *testing.T) {
+	tokenPath := filepath.Join(t.TempDir(), "agent-auth-token")
+	var register domain.AgentRegistrationRequest
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agents/register":
+			if err := json.NewDecoder(r.Body).Decode(&register); err != nil {
+				t.Fatalf("decode register request: %v", err)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"id":"dev-us","name":"dev-us","provider":"kubernetes","agentAuthToken":"persisted-agent-auth-token"}`))
+		case "/api/v1/agents/heartbeat":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:    controlPlane.URL,
+		ClusterID:          "dev-us",
+		AgentID:            "agent-install-check",
+		AgentVersion:       "test",
+		RegistrationToken:  "bootstrap-registration-token",
+		AgentAuthTokenFile: tokenPath,
+		HeartbeatInterval:  30 * time.Second,
+		ReportTimeout:      5 * time.Second,
+		KubernetesAPIURL:   "https://kubernetes.example",
+		BootstrapProjectID: "bootstrap-project",
+		NamespaceSelector:  "",
+		AgentNamespace:     "envpilot",
+		KubernetesToken:    "kube-token",
+		KubernetesCA:       "",
+		ResyncInterval:     30 * time.Second,
+	}
+	source := fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{Capabilities: []string{"core-v1"}},
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+
+	if _, err := runAgentInstallCheckFlow(context.Background(), cfg, source, reporter); err != nil {
+		t.Fatalf("runAgentInstallCheckFlow: %v", err)
+	}
+	if register.RegistrationToken != "bootstrap-registration-token" {
+		t.Fatalf("registration token = %q", register.RegistrationToken)
+	}
+	content, err := os.ReadFile(tokenPath)
+	if err != nil {
+		t.Fatalf("read persisted auth token: %v", err)
+	}
+	if strings.TrimSpace(string(content)) != "persisted-agent-auth-token" {
+		t.Fatalf("persisted auth token = %q", string(content))
+	}
+}
+
+func TestRunAgentInstallCheckFlowWithPersistedAuthSkipsRegistration(t *testing.T) {
+	var registerCalled bool
+	var heartbeat domain.AgentHeartbeatRequest
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agents/register":
+			registerCalled = true
+			t.Fatalf("persisted auth flow must not call register")
+		case "/api/v1/agents/heartbeat":
+			if err := json.NewDecoder(r.Body).Decode(&heartbeat); err != nil {
+				t.Fatalf("decode heartbeat request: %v", err)
+			}
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			t.Fatalf("unexpected request path: %s", r.URL.Path)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:    controlPlane.URL,
+		ClusterID:          "dev-us",
+		AgentID:            "agent-install-check",
+		AgentVersion:       "test",
+		RegistrationToken:  "consumed-bootstrap-token",
+		AgentAuthToken:     "persisted-agent-auth-token",
+		HeartbeatInterval:  30 * time.Second,
+		ReportTimeout:      5 * time.Second,
+		KubernetesAPIURL:   "https://kubernetes.example",
+		BootstrapProjectID: "bootstrap-project",
+	}
+	source := fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{Capabilities: []string{"core-v1"}},
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+
+	if _, err := runAgentInstallCheckFlow(context.Background(), cfg, source, reporter); err != nil {
+		t.Fatalf("runAgentInstallCheckFlow: %v", err)
+	}
+	if registerCalled {
+		t.Fatalf("register should not be called when persisted auth token exists")
+	}
+	if heartbeat.AgentAuthToken != "persisted-agent-auth-token" {
+		t.Fatalf("heartbeat agent auth token = %q", heartbeat.AgentAuthToken)
+	}
+}
+
+func TestRunAgentInstallCheckFlowPropagatesRegistrationFailure(t *testing.T) {
+	requests := 0
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		switch r.URL.Path {
+		case "/api/v1/agents/register":
+			w.WriteHeader(http.StatusInternalServerError)
+		case "/api/v1/agents/heartbeat":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer controlPlane.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:   controlPlane.URL,
+		ClusterID:         "dev-us",
+		AgentID:           "agent-install-check",
+		AgentVersion:      "test",
+		HeartbeatInterval: 30 * time.Second,
+		ReportTimeout:     5 * time.Second,
+	}
+	source := fakeCapabilitySource{
+		capabilities: agent.ClusterCapabilities{
+			KubernetesVersion: "v1.30.1",
+			Capabilities:      []string{"core-v1", "apps-v1", "flux-helm-v2"},
+		},
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+
+	_, err := runAgentInstallCheckFlow(context.Background(), cfg, source, reporter)
+	if err == nil {
+		t.Fatal("expected registration failure error")
+	}
+	if requests != 1 {
+		t.Fatalf("expected 1 registration request, got %d", requests)
+	}
+}
+
+func TestRunAgentResourceScanTickUsesAgentAuthTokenWithoutRegistrationToken(t *testing.T) {
+	var nextAuth string
+	var scanAuth string
+	var scanPayload domain.AgentResourceScanRequest
+	var rawScanBody []byte
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/agents/resource-scan/next":
+			nextAuth = r.Header.Get("Authorization")
+			if r.URL.Query().Get("registrationToken") != "" {
+				t.Fatalf("scan next must not send registrationToken: %s", r.URL.RawQuery)
+			}
+			if r.URL.Query().Get("agentAuthToken") != "" {
+				t.Fatalf("scan next must not send agentAuthToken query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(domain.AgentResourceScanTaskResponse{
+				ProjectID:  "bootstrap-project",
+				ClusterID:  "dev-us",
+				AgentID:    "agent-scan",
+				Namespaces: []string{"dev-base"},
+				ObservedAt: time.Now().UTC(),
+			})
+		case "/api/v1/agents/resource-scan":
+			scanAuth = r.Header.Get("Authorization")
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatalf("read scan payload: %v", err)
+			}
+			rawScanBody = body
+			if err := json.Unmarshal(body, &scanPayload); err != nil {
+				t.Fatalf("decode scan payload: %v", err)
+			}
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			t.Fatalf("unexpected control plane path: %s", r.URL.Path)
+		}
+	}))
+	defer controlPlane.Close()
+
+	kubeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/namespaces/dev-base" {
+			_, _ = w.Write([]byte(`{"metadata":{"name":"dev-base","labels":{"env":"dev"}}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"items":[]}`))
+	}))
+	defer kubeServer.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:    controlPlane.URL,
+		BootstrapProjectID: "bootstrap-project",
+		ClusterID:          "dev-us",
+		AgentID:            "agent-scan",
+		AgentAuthToken:     "agent-auth-token",
+		RegistrationToken:  "",
+		HeartbeatInterval:  30 * time.Second,
+		ReportTimeout:      5 * time.Second,
+		FluxNamespace:      "flux-system",
+		NamespaceSelector:  "",
+		AgentNamespace:     "envpilot",
+		KubernetesAPIURL:   kubeServer.URL,
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "control-plane-token", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+	source := agent.NewKubernetesNamespaceSource(kubeServer.URL, "kube-token", "", nil, kubeServer.Client())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	if err := runAgentResourceScanTick(context.Background(), cfg, reporter, source, logger); err != nil {
+		t.Fatalf("resource scan tick: %v", err)
+	}
+	if nextAuth != "Bearer agent-auth-token" {
+		t.Fatalf("next auth = %q", nextAuth)
+	}
+	if scanAuth != "Bearer agent-auth-token" {
+		t.Fatalf("scan auth = %q", scanAuth)
+	}
+	if bytes.Contains(rawScanBody, []byte("agentAuthToken")) || bytes.Contains(rawScanBody, []byte("agent_auth_token")) {
+		t.Fatalf("scan payload must not include agent auth token when bearer auth is used: %s", string(rawScanBody))
+	}
+	if scanPayload.ProjectID != "bootstrap-project" || scanPayload.ClusterID != "dev-us" || scanPayload.AgentID != "agent-scan" {
+		t.Fatalf("scan payload identity = %#v", scanPayload)
+	}
+}
+
+func TestRunAgentResourceScanTickSkipsWithoutAgentAuthToken(t *testing.T) {
+	var requests int
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer controlPlane.Close()
+	kubeServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer kubeServer.Close()
+
+	cfg := agent.Config{
+		ControlPlaneURL:    controlPlane.URL,
+		BootstrapProjectID: "bootstrap-project",
+		ClusterID:          "dev-us",
+		AgentID:            "agent-scan",
+		AgentAuthToken:     "",
+		RegistrationToken:  "consumed-registration-token",
+		ReportTimeout:      5 * time.Second,
+	}
+	reporter := agent.NewHTTPStatusReporterForAgent(controlPlane.URL, "control-plane-token", cfg.ClusterID, cfg.AgentID, cfg.ReportTimeout)
+	source := agent.NewKubernetesNamespaceSource(kubeServer.URL, "kube-token", "", nil, kubeServer.Client())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+
+	if err := runAgentResourceScanTick(context.Background(), cfg, reporter, source, logger); err != nil {
+		t.Fatalf("resource scan tick: %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("scan without agent auth token should not call control plane or kube API, got %d requests", requests)
+	}
+	if !strings.Contains(logs.String(), "agent auth token is required") {
+		t.Fatalf("expected clear missing token log, got %s", logs.String())
+	}
+}

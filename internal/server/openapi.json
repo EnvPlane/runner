@@ -1,0 +1,1691 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EnvPilot API",
+    "version": "1.0.0",
+    "description": "Control plane API for EnvPilot environments, projects, products, settings and webhook intake."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "apiToken": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "Authorization",
+        "description": "Bearer <token> with optional ENVPILOT_API_READ_TOKEN / ENVPILOT_API_WRITE_TOKEN"
+      },
+      "agentAuthToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "agentAuthToken",
+        "description": "Bearer agentAuthToken returned by POST /api/v1/agents/register. The one-time bootstrap token is only valid for the initial registration exchange and must not be sent to heartbeat or resource scan endpoints."
+      },
+      "runnerAuthToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "runnerAuthToken",
+        "description": "Bearer runnerAuthToken returned by POST /api/v1/runners/register. The one-time bootstrap token is only valid for the initial registration exchange and must not be sent to heartbeat endpoints."
+      },
+      "projectConfigToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "projectConfigToken",
+        "description": "Bearer projectConfigToken from runner deployment instructions. This token is bound to runner identity, one-time use, and must be sent only in the Authorization header."
+      }
+    },
+    "schemas": {
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "EmptyObject": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "Health": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "DashboardSummary": {
+        "type": "object",
+        "properties": {
+          "activeEnvironments": { "type": "integer" },
+          "failedEnvironments": { "type": "integer" },
+          "idleEnvironments": { "type": "integer" },
+          "estimatedDailyCost": { "type": "string" }
+        }
+      },
+      "ProjectPatch": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "name": { "type": "string" },
+          "repositoryUrl": { "type": "string" },
+          "gitopsRepoUrl": { "type": "string" },
+          "previewDomain": { "type": "string" },
+          "defaultBranch": { "type": "string" },
+          "helmChartPath": { "type": "string" },
+          "fluxPath": { "type": "string" },
+          "baseNamespace": { "type": "string" },
+          "cost_policy": { "$ref": "#/components/schemas/ProjectCostPolicy" }
+        }
+      },
+      "SCMValidationRequest": {
+        "type": "object",
+        "properties": {
+          "provider": { "type": "string" },
+          "appRepoUrl": { "type": "string" },
+          "gitopsRepoUrl": { "type": "string" },
+          "defaultBranch": { "type": "string" },
+          "authMethod": { "type": "string" },
+          "oauthToken": { "type": "string", "nullable": true },
+          "appToken": { "type": "string", "nullable": true },
+          "deployToken": { "type": "string", "nullable": true },
+          "sshPrivateKey": { "type": "string", "nullable": true },
+          "provider_name": { "type": "string", "nullable": true },
+          "app_repo_url": { "type": "string", "nullable": true },
+          "gitops_repo_url": { "type": "string", "nullable": true },
+          "default_branch": { "type": "string", "nullable": true },
+          "auth_method": { "type": "string", "nullable": true },
+          "oauth_token": { "type": "string", "nullable": true },
+          "app_token": { "type": "string", "nullable": true },
+          "deploy_token": { "type": "string", "nullable": true },
+          "ssh_private_key": { "type": "string", "nullable": true }
+        }
+      },
+      "SCMValidationError": {
+        "type": "object",
+        "properties": {
+          "field": { "type": "string" },
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      },
+      "SCMValidationResult": {
+        "type": "object",
+        "properties": {
+          "provider": { "type": "string" },
+          "appRepoUrl": { "type": "string" },
+          "gitopsRepoUrl": { "type": "string" },
+          "defaultBranch": { "type": "string" },
+          "appRepositoryReadable": { "type": "boolean" },
+          "gitopsRepositoryWritable": { "type": "boolean" },
+          "branches": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "errors": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SCMValidationError" }
+          },
+          "warnings": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/SCMValidationError" }
+          },
+          "validationProvider": { "type": "string" },
+          "hasAuthenticationValidated": { "type": "boolean" },
+          "valid": { "type": "boolean" }
+        }
+      },
+      "HybridConfig": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string" },
+          "baseNamespace": { "type": "string" },
+          "baseDomain": { "type": "string" },
+          "baseIngress": { "type": "string" },
+          "sharedDependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "services": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmptyObject" }
+          },
+          "hybridOverrides": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          },
+          "hybrid_overrides": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          }
+        }
+      },
+      "HybridConfigPatch": {
+        "type": "object",
+        "properties": {
+          "baseNamespace": { "type": "string" },
+          "base_namespace": { "type": "string" },
+          "baseDomain": { "type": "string" },
+          "base_domain": { "type": "string" },
+          "baseIngress": { "type": "string" },
+          "base_ingress": { "type": "string" },
+          "sharedDependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "shared_dependencies": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "hybridOverrides": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          },
+          "hybrid_overrides": {
+            "type": "object",
+            "additionalProperties": { "type": "boolean" }
+          }
+        }
+      },
+      "ProjectCostPolicy": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string" },
+          "defaultTTLHours": { "type": "integer" },
+          "default_ttl_hours": { "type": "integer" },
+          "maxActiveEnvs": { "type": "integer" },
+          "max_active_envs": { "type": "integer" },
+          "maxActiveEnvsPerProject": { "type": "integer" },
+          "max_active_envs_per_project": { "type": "integer" },
+          "cpuQuota": { "type": "integer" },
+          "cpu_quota": { "type": "integer" },
+          "maxCPUPerEnv": { "type": "integer" },
+          "max_cpu_per_env": { "type": "integer" },
+          "memoryQuota": { "type": "integer" },
+          "memory_quota": { "type": "integer" },
+          "maxMemoryPerEnv": { "type": "integer" },
+          "max_memory_per_env": { "type": "integer" },
+          "idleTimeoutHours": { "type": "integer" },
+          "idle_timeout_hours": { "type": "integer" },
+          "autoDeleteIdleEnvs": { "type": "boolean", "nullable": true },
+          "auto_delete_idle_envs": { "type": "boolean", "nullable": true }
+        }
+      },
+      "BootstrapSession": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "project_id": { "type": "string" },
+          "current_step": { "type": "integer" },
+          "status": { "type": "string" },
+          "created_by": { "type": "string" },
+          "data": { "$ref": "#/components/schemas/BootstrapSessionDataPublic" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "BootstrapSessionDataPublic": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "gitOpsOutputPath": { "type": "string", "nullable": true },
+          "git_ops_output_path": { "type": "string", "nullable": true },
+          "fluxNamespace": { "type": "string", "nullable": true },
+          "flux_namespace": { "type": "string", "nullable": true },
+          "fluxKustomizationRef": { "type": "string", "nullable": true },
+          "flux_kustomization_ref": { "type": "string", "nullable": true },
+          "fluxGitRepositoryRef": { "type": "string", "nullable": true },
+          "flux_git_repository_ref": { "type": "string", "nullable": true },
+          "gitOpsCommitMode": { "type": "string", "nullable": true },
+          "git_ops_commit_mode": { "type": "string", "nullable": true },
+          "manifestTemplates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BootstrapManifestTemplate" }
+          },
+          "secretStrategies": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/BootstrapSecretStrategyPublic" }
+          },
+          "secret_strategies": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/BootstrapSecretStrategyPublic" }
+          }
+        }
+      },
+      "BootstrapSecretStrategyInput": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "reference existing secret",
+              "external secret",
+              "encrypted clone",
+              "manual input"
+            ]
+          },
+          "required": { "type": "boolean" },
+          "backend": { "type": "string" },
+          "reference": { "type": "string" },
+          "secretName": { "type": "string" },
+          "namespace": { "type": "string" },
+          "service": { "type": "string" },
+          "serviceId": { "type": "string" },
+          "container": { "type": "string" },
+          "variable": { "type": "string" },
+          "source": { "type": "string" },
+          "manualValue": { "type": "string", "writeOnly": true },
+          "manual_value": { "type": "string", "writeOnly": true }
+        }
+      },
+      "BootstrapSecretStrategyPublic": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "strategy": { "type": "string" },
+          "required": { "type": "boolean" },
+          "backend": { "type": "string" },
+          "reference": { "type": "string" },
+          "secretName": { "type": "string" },
+          "namespace": { "type": "string" },
+          "service": { "type": "string" },
+          "serviceId": { "type": "string" },
+          "container": { "type": "string" },
+          "variable": { "type": "string" },
+          "source": { "type": "string" },
+          "manualValueStored": { "type": "boolean" },
+          "manualValueMasked": { "type": "boolean" },
+          "manualValue": { "type": "string", "description": "Always empty in API responses." }
+        }
+      },
+      "BootstrapSessionStepData": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "gitOpsOutputPath": { "type": "string" },
+          "git_ops_output_path": { "type": "string" },
+          "fluxNamespace": { "type": "string" },
+          "flux_namespace": { "type": "string" },
+          "fluxKustomizationRef": { "type": "string" },
+          "flux_kustomization_ref": { "type": "string" },
+          "fluxGitRepositoryRef": { "type": "string" },
+          "flux_git_repository_ref": { "type": "string" },
+          "gitOpsCommitMode": { "type": "string" },
+          "git_ops_commit_mode": { "type": "string" },
+          "manifestTemplates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BootstrapManifestTemplate" }
+          },
+          "secretStrategies": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/BootstrapSecretStrategyInput" }
+          },
+          "secret_strategies": {
+            "type": "object",
+            "additionalProperties": { "$ref": "#/components/schemas/BootstrapSecretStrategyInput" }
+          }
+        }
+      },
+      "BootstrapSessionCreate": {
+        "type": "object",
+        "properties": {
+          "createdBy": { "type": "string" },
+          "created_by": { "type": "string" }
+        }
+      },
+      "BootstrapManifestTemplate": {
+        "type": "object",
+        "properties": {
+          "kind": { "type": "string" },
+          "namespace": { "type": "string" },
+          "name": { "type": "string" },
+          "yaml": { "type": "string" }
+        }
+      },
+      "ManifestTemplateValidationIssue": {
+        "type": "object",
+        "properties": {
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "column": { "type": "integer" },
+          "code": { "type": "string" },
+          "message": { "type": "string" }
+        },
+        "required": ["file", "code", "message"]
+      },
+      "ManifestTemplateValidationResult": {
+        "type": "object",
+        "properties": {
+          "valid": { "type": "boolean" },
+          "issues": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ManifestTemplateValidationIssue" }
+          }
+        },
+        "required": ["valid", "issues"]
+      },
+      "BootstrapSessionSimulatePRRequest": {
+        "type": "object",
+        "properties": {
+          "dryRunCommit": { "type": "boolean" },
+          "dry_run_commit": { "type": "boolean" }
+        }
+      },
+      "BootstrapSessionSimulatePRDryRun": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "status": { "type": "string" },
+          "message": { "type": "string" },
+          "commitPath": { "type": "string" },
+          "fileCount": { "type": "integer" },
+          "files": { "type": "array", "items": { "type": "string" } },
+          "simulatedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["enabled", "status", "message", "commitPath", "fileCount", "files", "simulatedAt"]
+      },
+      "BootstrapSessionSimulatePRResponse": {
+        "type": "object",
+        "properties": {
+          "validation": { "$ref": "#/components/schemas/ManifestTemplateValidationResult" },
+          "manifestTemplates": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BootstrapManifestTemplate" }
+          },
+          "dryRun": { "$ref": "#/components/schemas/BootstrapSessionSimulatePRDryRun" }
+        },
+        "required": ["validation", "manifestTemplates"]
+      },
+      "BootstrapSessionPatch": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "current_step": { "type": "integer" },
+          "currentStep": { "type": "integer" },
+          "stepData": { "$ref": "#/components/schemas/BootstrapSessionStepData" },
+          "step_data": { "$ref": "#/components/schemas/BootstrapSessionStepData" }
+        },
+        "example": {
+          "current_step": 8,
+          "status": "compiled",
+          "step_data": {
+                "secretStrategies": {
+                  "dev/db-password": {
+                    "strategy": "manual input",
+                "required": true,
+                "serviceId": "Service/dev/orders",
+                "container": "orders-api",
+                "variable": "DB_PASSWORD",
+                "manualValue": "super-secret-value"
+              },
+              "dev/payment-api-token": {
+                "strategy": "external secret",
+                "required": true,
+                "backend": "vault",
+                "reference": "kv/data/envpilot/payment#token"
+              }
+            }
+          }
+        }
+      },
+      "AgentRegistrationTokenResponse": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string" },
+          "clusterId": { "type": "string" },
+          "agentNamespace": { "type": "string" },
+          "releaseName": { "type": "string" },
+          "registrationToken": { "type": "string" },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "helmCommand": { "type": "string" },
+          "bootstrapSecretCommand": { "type": "string" },
+          "bootstrapSecretCommandSensitive": { "type": "boolean" },
+          "status": { "type": "string" }
+        }
+      },
+      "BootstrapAgentStatusResponse": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "clusterId": { "type": "string" },
+          "agentId": { "type": "string" },
+          "lastSeenAt": { "type": "string", "format": "date-time", "nullable": true },
+          "tokenExpiresAt": { "type": "string", "format": "date-time", "nullable": true },
+          "tokenIssuedAt": { "type": "string", "format": "date-time", "nullable": true },
+          "capabilityReport": { "$ref": "#/components/schemas/EmptyObject" },
+          "selectedNamespaces": { "type": "array", "items": { "type": "string" } },
+          "resourceScanStatus": { "type": "string" },
+          "resourceCount": { "type": "integer" },
+          "error": { "type": "string" }
+        }
+      },
+      "AgentResourceScanTaskResponse": {
+        "type": "object",
+        "properties": {
+          "projectId": { "type": "string" },
+          "clusterId": { "type": "string" },
+          "agentId": { "type": "string" },
+          "namespaces": { "type": "array", "items": { "type": "string" } },
+          "observedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "AgentResourceScanRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "projectId": { "type": "string" },
+          "project_id": { "type": "string" },
+          "clusterId": { "type": "string" },
+          "cluster_id": { "type": "string" },
+          "agentId": { "type": "string" },
+          "resourceSnapshots": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmptyObject" }
+          },
+          "serviceGraph": { "$ref": "#/components/schemas/EmptyObject" },
+          "serviceEnvs": { "$ref": "#/components/schemas/EmptyObject" },
+          "permissionWarnings": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "observedAt": { "type": "string", "format": "date-time" }
+        },
+        "required": ["projectId", "clusterId", "agentId", "resourceSnapshots"]
+      },
+      "RunnerConfigRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "clusterId": { "type": "string" },
+          "cluster_id": { "type": "string" },
+          "runnerId": { "type": "string" },
+          "runner_id": { "type": "string" },
+          "runnerNamespace": { "type": "string" },
+          "runner_namespace": { "type": "string" },
+          "deploymentMode": { "type": "string", "enum": ["helm", "gitops"] },
+          "deployment_mode": { "type": "string", "enum": ["helm", "gitops"] }
+        },
+        "required": ["clusterId", "runnerId", "runnerNamespace", "deploymentMode"]
+      },
+      "RunnerConfigResponse": {
+        "type": "object",
+        "additionalProperties": true,
+        "properties": {
+          "project_id": { "type": "string" },
+          "version": { "type": "integer" },
+          "config": { "$ref": "#/components/schemas/EmptyObject" },
+          "sensitive_refs": { "$ref": "#/components/schemas/EmptyObject" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "EventsResponse": {
+        "type": "object",
+        "properties": {
+          "events": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/EmptyObject" }
+          }
+        }
+      },
+      "FluxStatusResponse": {
+        "type": "object",
+        "properties": {
+          "fluxStatus": { "$ref": "#/components/schemas/EmptyObject" }
+        }
+      }
+    }
+  },
+  "paths": {
+    "/api/dashboard/summary": {
+      "get": {
+        "summary": "Get UI dashboard summary",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Dashboard summary",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DashboardSummary" } } }
+          }
+        }
+      }
+    },
+    "/api/projects": {
+      "get": {
+        "summary": "List projects for UI",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Projects",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } }
+          }
+        }
+      }
+    },
+    "/api/projects/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get project for UI",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Partially update project for UI",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+      },
+    "/api/projects/{id}/bootstrap-session": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get bootstrap session for project",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Bootstrap session",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapSession" } } }
+          },
+          "404": { "description": "No session", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "post": {
+        "summary": "Create bootstrap session for project",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BootstrapSessionCreate" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Created or restored bootstrap session",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapSession" } } }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update bootstrap session for project",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BootstrapSessionPatch" },
+              "examples": {
+                "secretStrategies": {
+                  "summary": "Update secret strategies with manual and external modes",
+                  "value": {
+                    "current_step": 8,
+                    "status": "compiled",
+                    "step_data": {
+                      "secretStrategies": {
+                        "dev/db-password": {
+                          "strategy": "manual input",
+                          "required": true,
+                          "serviceId": "Service/dev/orders",
+                          "container": "orders-api",
+                          "variable": "DB_PASSWORD",
+                          "manualValue": "super-secret-value"
+                        },
+                        "dev/payment-api-token": {
+                          "strategy": "external secret",
+                          "required": true,
+                          "backend": "vault",
+                          "reference": "kv/data/envpilot/payment#token"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated bootstrap session",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BootstrapSession" },
+                "examples": {
+                  "maskedSecretStrategies": {
+                    "summary": "Secret values are masked after save",
+                    "value": {
+                      "id": "checkout-bs-1714726400000000000",
+                      "project_id": "checkout",
+                      "current_step": 8,
+                      "status": "compiled",
+                      "created_by": "alice",
+                      "data": {
+                        "secretStrategies": {
+                          "dev/db-password": {
+                            "strategy": "manual input",
+                            "required": true,
+                            "serviceId": "Service/dev/orders",
+                            "container": "orders-api",
+                            "variable": "DB_PASSWORD",
+                            "manualValueStored": true,
+                            "manualValueMasked": true,
+                            "manualValue": ""
+                          },
+                          "dev/payment-api-token": {
+                            "strategy": "external secret",
+                            "required": true,
+                            "backend": "vault",
+                            "reference": "kv/data/envpilot/payment#token"
+                          }
+                        }
+                      },
+                      "created_at": "2026-05-02T10:00:00Z",
+                      "updated_at": "2026-05-02T10:05:00Z"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/manifest-templates": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get generated bootstrap manifest templates for project",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Bootstrap manifest templates",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projectId": { "type": "string" },
+                    "bootstrapSessionId": { "type": "string" },
+                    "manifestTemplates": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/BootstrapManifestTemplate" }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/compile": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Compile bootstrap session into generated manifest templates",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Bootstrap session updated to compiled status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapSession" } } }
+          },
+          "400": {
+            "description": "Validation failed",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/simulate-pr": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Simulate PR creation and return validation and generated templates",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/BootstrapSessionSimulatePRRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "PR simulation result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/BootstrapSessionSimulatePRResponse" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payload",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/validate-scm": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Validate bootstrap session SCM connection settings",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SCMValidationRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "SCM validation result",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/SCMValidationResult" } } }
+          },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "503": { "description": "SCM validation unavailable" }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/agent-token": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Generate one-time bootstrap agent registration token",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EmptyObject" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Bootstrap agent token response",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentRegistrationTokenResponse" } } }
+          },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/agent-status": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get bootstrap agent connection and scan status",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Bootstrap agent status",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapAgentStatusResponse" } } }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/bootstrap-session/resource-scan/start": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Schedule bootstrap resource scan task",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "202": {
+            "description": "Resource scan task scheduled",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/BootstrapSession" } } }
+          },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/environments": {
+      "get": {
+        "summary": "List environments for project",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Project environments",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } }
+          },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/hybrid-config": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get project hybrid config",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Hybrid config", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HybridConfig" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update project hybrid config",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HybridConfigPatch" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated hybrid config", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/HybridConfig" } } } },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/cost-policy": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get project cost policy",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Project cost policy", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCostPolicy" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "patch": {
+        "summary": "Update project cost policy",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCostPolicy" } } }
+        },
+        "responses": {
+          "200": { "description": "Updated project cost policy", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCostPolicy" } } } },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/projects/{id}/runtime-bundle": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Download project runtime bundle",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Runtime bundle archive",
+            "content": {
+              "application/zip": { "schema": { "type": "string", "format": "binary" } }
+            }
+          },
+          "400": { "description": "Compile required before bundle can be downloaded", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Project or config not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "503": { "description": "Project config storage is not configured" }
+        }
+      }
+    },
+    "/api/environments": {
+      "get": {
+        "summary": "List environments for UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "project", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "status", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "mode", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "owner", "in": "query", "required": false, "schema": { "type": "string" } },
+          { "name": "failed", "in": "query", "required": false, "schema": { "type": "boolean" } },
+          { "name": "idle", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Environments",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } }
+          }
+        }
+      }
+    },
+    "/api/environments/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get environment for UI",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Environment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete environment from UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "force", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted environment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/environments/{id}/recreate": {
+      "post": {
+        "summary": "Recreate environment from UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "202": { "description": "Recreate job accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/environments/{id}/pin": {
+      "post": {
+        "summary": "Pin environment from UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Pinned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/environments/{id}/unpin": {
+      "post": {
+        "summary": "Unpin environment from UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Unpinned", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/environments/{id}/extend-ttl": {
+      "post": {
+        "summary": "Extend environment TTL from UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Extended", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "409": { "description": "Conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/environments/{id}/events": {
+      "get": {
+        "summary": "List environment lifecycle or Kubernetes events for UI",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Events", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventsResponse" } } } } }
+      }
+    },
+    "/api/environments/{id}/kubernetes-events": {
+      "get": {
+        "summary": "List Kubernetes events for environment",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "type", "in": "query", "required": false, "schema": { "type": "string", "enum": ["Normal", "Warning"] } }
+        ],
+        "responses": { "200": { "description": "Kubernetes events", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EventsResponse" } } } } }
+      }
+    },
+    "/api/environments/{id}/flux-status": {
+      "get": {
+        "summary": "Get FluxCD status for environment",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Flux status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/FluxStatusResponse" } } } } }
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Health"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/products": {
+      "get": {
+        "summary": "List products",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": { "$ref": "#/components/schemas/EmptyObject" }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Validate product payload",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Validation result",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/EmptyObject" }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid payload",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/products/{name}": {
+      "parameters": [
+        {
+          "name": "name",
+          "in": "path",
+          "required": true,
+          "schema": { "type": "string" }
+        }
+      ],
+      "get": {
+        "summary": "Get product template",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Product",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+          },
+          "404": {
+            "description": "Not found",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } }
+          }
+        }
+      },
+      "put": {
+        "summary": "Create or update product",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Created or updated",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+          },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "409": { "description": "Conflict" }
+        }
+      },
+      "delete": {
+        "summary": "Delete product",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Deleted",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+          }
+        }
+      }
+    },
+    "/api/v1/projects": {
+      "get": {
+        "summary": "List projects",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Projects",
+            "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } }
+          }
+        }
+      }
+    },
+    "/api/v1/projects/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get project",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Project", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "put": {
+        "summary": "Create or update project",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": {
+          "200": { "description": "Created or updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/projects/{id}/hybrid-config": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "put": {
+        "summary": "Update project hybrid config",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "hybrid_overrides": {
+                    "type": "object",
+                    "additionalProperties": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Created or updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/projects/{id}/runner-config": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Fetch runner-scoped project configuration",
+        "description": "Authenticates only with Authorization: Bearer <projectConfigToken>. The token is one-time use and bound to projectId, runnerId, clusterId, runnerNamespace and deploymentMode. Request-body token fields are not accepted.",
+        "security": [{ "projectConfigToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RunnerConfigRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Runner-scoped project config", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RunnerConfigResponse" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Missing, invalid, expired or used projectConfigToken", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Project config not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "summary": "Get settings",
+        "security": [{ "apiToken": [] }],
+        "responses": { "200": { "description": "Settings", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      },
+      "put": {
+        "summary": "Save settings",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": { "200": { "description": "Saved", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/v1/settings/secret-refs/{id}/validate": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "post": {
+        "summary": "Validate secret reference",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Validation result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/settings/clusters/{id}/health": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get cluster health definition",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Cluster", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/agents/register": {
+      "post": {
+        "summary": "Register agent",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } }
+        }
+      }
+    },
+    "/api/v1/agents/heartbeat": {
+      "post": {
+        "summary": "Agent heartbeat",
+        "description": "Authenticates with agentAuthToken only. One-time bootstrap credentials are not accepted for heartbeat after initial registration.",
+        "security": [{ "agentAuthToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "projectId": { "type": "string" },
+                  "clusterId": { "type": "string" },
+                  "agentId": { "type": "string" },
+                  "agentAuthToken": { "type": "string" },
+                  "agentVersion": { "type": "string" },
+                  "kubernetesVersion": { "type": "string" },
+                  "capabilities": { "type": "array", "items": { "type": "string" } },
+                  "status": { "type": "string" },
+                  "error": { "type": "string" },
+                  "observedAt": { "type": "string", "format": "date-time" }
+                },
+                "required": ["projectId", "clusterId", "agentId", "agentAuthToken"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } }
+        }
+      }
+    },
+    "/api/v1/runners/heartbeat": {
+      "post": {
+        "summary": "Runner heartbeat",
+        "description": "Authenticates with runnerAuthToken only. One-time bootstrap credentials are not accepted for heartbeat after initial registration.",
+        "security": [{ "runnerAuthToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "projectId": { "type": "string" },
+                  "clusterId": { "type": "string" },
+                  "runnerId": { "type": "string" },
+                  "runnerNamespace": { "type": "string" },
+                  "deploymentMode": { "type": "string" },
+                  "runnerAuthToken": { "type": "string" },
+                  "status": { "type": "string", "enum": ["waiting", "connected", "online", "failed"] },
+                  "error": { "type": "string" },
+                  "observedAt": { "type": "string", "format": "date-time" }
+                },
+                "required": ["projectId", "runnerId", "runnerAuthToken"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Missing required fields", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/agents/resource-scan": {
+      "post": {
+        "summary": "Ingest bootstrap resource scan snapshots from agent",
+        "description": "Authenticates with Authorization: Bearer <agentAuthToken>. One-time bootstrap credentials are only valid for initial agent registration and must not be sent to heartbeat or resource scan endpoints.",
+        "security": [{ "agentAuthToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AgentResourceScanRequest" }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "No active scan task", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/agents/resource-scan/next": {
+      "get": {
+        "summary": "Fetch next bootstrap resource scan task for agent",
+        "description": "Authenticates with Authorization: Bearer <agentAuthToken>. One-time bootstrap credentials are only valid for initial agent registration and must not be sent to heartbeat or resource scan endpoints.",
+        "security": [{ "agentAuthToken": [] }],
+        "parameters": [
+          { "name": "projectId", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "clusterId", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "agentId", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": { "description": "Resource scan task", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/AgentResourceScanTaskResponse" } } } },
+          "204": { "description": "No pending task" },
+          "400": { "description": "Missing required query params", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "401": { "description": "Unauthorized", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "404": { "description": "Project or session not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/jobs": {
+      "get": {
+        "summary": "List jobs",
+        "security": [{ "apiToken": [] }],
+        "responses": { "200": { "description": "Jobs", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } } } }
+      }
+    },
+    "/api/v1/jobs/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get job",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Job", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/jobs/{id}/retry": {
+      "post": {
+        "summary": "Retry job",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/environments": {
+      "get": {
+        "summary": "List environments",
+        "security": [{ "apiToken": [] }],
+        "responses": { "200": { "description": "Environments", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } } } }
+      },
+      "post": {
+        "summary": "Create environment",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": {
+          "201": { "description": "Created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/environment-records": {
+      "get": {
+        "summary": "List environment records",
+        "security": [{ "apiToken": [] }],
+        "responses": { "200": { "description": "Environment records", "content": { "application/json": { "schema": { "type": "array", "items": { "$ref": "#/components/schemas/EmptyObject" } } } } } }
+      }
+    },
+    "/api/v1/render/preview": {
+      "post": {
+        "summary": "Preview rendered environment manifests",
+        "security": [{ "apiToken": [] }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": {
+          "200": { "description": "Preview", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/environments/{id}": {
+      "parameters": [
+        { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+      ],
+      "get": {
+        "summary": "Get environment",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": { "description": "Environment", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      },
+      "delete": {
+        "summary": "Delete environment",
+        "security": [{ "apiToken": [] }],
+        "parameters": [
+          { "name": "force", "in": "query", "required": false, "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": { "description": "Deleted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } }
+        }
+      }
+    },
+    "/api/v1/environments/{id}/pin": {
+      "post": {
+        "summary": "Pin environment",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/v1/environments/{id}/unpin": {
+      "post": {
+        "summary": "Unpin environment",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/v1/environments/{id}/extend-ttl": {
+      "post": {
+        "summary": "Extend environment TTL",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "404": { "description": "Not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "409": { "description": "Conflict", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/environments/{id}/status": {
+      "post": {
+        "summary": "Update status from cluster",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } }
+        },
+        "responses": { "200": { "description": "Updated", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/v1/environments/{id}/events": {
+      "get": {
+        "summary": "List environment events",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Events", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      },
+      "post": {
+        "summary": "Ingest environment events",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "202": { "description": "Accepted" } }
+      }
+    },
+    "/api/v1/environments/{id}/flux-status": {
+      "get": {
+        "summary": "Get environment flux status",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Flux status", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      },
+      "post": {
+        "summary": "Ingest flux status",
+        "security": [{ "apiToken": [] }],
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "202": { "description": "Accepted" } }
+      }
+    },
+    "/api/v1/environments/reconcile": {
+      "post": {
+        "summary": "Reconcile expired environments",
+        "security": [{ "apiToken": [] }],
+        "responses": { "200": { "description": "Reconciliation result", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } } }
+      }
+    },
+    "/api/v1/webhooks/gitlab": {
+      "post": {
+        "summary": "GitLab webhook",
+        "description": "Accepts Merge Request webhook payloads",
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "401": { "description": "Invalid token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/webhooks/github": {
+      "post": {
+        "summary": "GitHub webhook",
+        "description": "Accepts pull request webhook payloads",
+        "responses": {
+          "202": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "401": { "description": "Invalid signature", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "400": { "description": "Invalid payload", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/webhook/github": {
+      "post": {
+        "summary": "GitHub webhook (legacy)",
+        "description": "POC-compatible GitHub webhook endpoint",
+        "responses": {
+          "200": { "description": "Accepted", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } },
+          "401": { "description": "Invalid signature", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification root alias",
+        "description": "Root-level alias for tooling that expects an OpenAPI document at /openapi.json.",
+        "responses": {
+          "200": { "description": "OpenAPI document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } }
+        }
+      }
+    },
+    "/api/v1/openapi.json": {
+      "get": {
+        "summary": "OpenAPI specification",
+        "responses": {
+          "200": { "description": "OpenAPI document", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/EmptyObject" } } } }
+        }
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "summary": "Prometheus metrics",
+        "security": [{ "apiToken": [] }],
+        "responses": {
+          "200": {
+            "description": "Prometheus-compatible text metrics"
+          }
+        }
+      }
+    }
+  }
+}
