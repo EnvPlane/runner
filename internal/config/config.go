@@ -40,6 +40,7 @@ type Config struct {
 	IdleThreshold                time.Duration
 	DefaultDomainRoot            string
 	GitOps                       gitops.FluxOptions
+	DeploymentBackend            string
 	APIReadToken                 string
 	APIWriteToken                string
 	APITokenRoles                map[string]string
@@ -70,6 +71,8 @@ type Config struct {
 	RateLimitWindow              time.Duration
 	BootstrapRateLimitRequests   int
 	BootstrapRateLimitWindow     time.Duration
+	DependencyWaitTimeout        time.Duration
+	DependencyWaitInterval       time.Duration
 	AllowUnauthenticatedAgents   bool
 	CleanupProtectedNamespaces   []string
 	CleanupRequireEnvPilotLabels bool
@@ -164,6 +167,8 @@ func FromEnv() Config {
 		RateLimitWindow:              time.Duration(getenvInt("ENVPILOT_RATE_LIMIT_SECONDS", 60)) * time.Second,
 		BootstrapRateLimitRequests:   getenvInt("ENVPILOT_BOOTSTRAP_RATE_LIMIT_REQUESTS", 20),
 		BootstrapRateLimitWindow:     time.Duration(getenvInt("ENVPILOT_BOOTSTRAP_RATE_LIMIT_SECONDS", 60)) * time.Second,
+		DependencyWaitTimeout:        time.Duration(getenvInt("ENVPILOT_DEPENDENCY_WAIT_TIMEOUT_SECONDS", 120)) * time.Second,
+		DependencyWaitInterval:       time.Duration(getenvInt("ENVPILOT_DEPENDENCY_WAIT_INTERVAL_SECONDS", 2)) * time.Second,
 		AllowUnauthenticatedAgents:   getenvBool("ENVPILOT_ALLOW_UNAUTHENTICATED_AGENTS", false),
 		CleanupProtectedNamespaces:   splitCSV(getenv("ENVPILOT_CLEANUP_PROTECTED_NAMESPACES", "default,kube-system,kube-public,kube-node-lease,flux-system,cert-manager")),
 		CleanupRequireEnvPilotLabels: getenvBool("ENVPILOT_CLEANUP_REQUIRE_ENVPILOT_LABELS", true),
@@ -183,6 +188,7 @@ func FromEnv() Config {
 			InfraVersion:    getenv("ENVPILOT_INFRA_CHART_VERSION", "${infraChartVersion}"),
 			NginxVersion:    getenv("ENVPILOT_NGINX_CHART_VERSION", "${nginxChartVersion}"),
 		},
+		DeploymentBackend: DeploymentBackendFromEnv(),
 	}
 	cfg.APITokenRoles = parseAPITokenRoleBindings(
 		getenv("ENVPILOT_API_TOKEN_ROLES", ""),
@@ -190,6 +196,26 @@ func FromEnv() Config {
 		cfg.APIWriteToken,
 	)
 	return cfg
+}
+
+func DeploymentBackendFromEnv() string {
+	raw := strings.ToLower(strings.TrimSpace(getenv("ENVPILOT_DEPLOYMENT_BACKEND", "helm_direct")))
+	switch raw {
+	case "gitops_manifest", "fluxcd", "helm_direct":
+		return raw
+	case "flux_cd":
+		return "fluxcd"
+	case "flux":
+		return "fluxcd"
+	case "helm-direct":
+		return "helm_direct"
+	case "gitops":
+		return "gitops_manifest"
+	case "":
+		return "helm_direct"
+	default:
+		return raw
+	}
 }
 
 func FromEnvWithRuntimeFile(path string) (Config, error) {

@@ -516,14 +516,17 @@ func runRunner(logger *slog.Logger) {
 
 	client := &http.Client{Timeout: cfg.ReportTimeout}
 	var err error
-	cfg, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
+	var registeredNow bool
+	cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 	if err != nil {
 		health.set(false)
 		logger.Error("runner registration failed", "error", err)
 		os.Exit(1)
 	}
-	if err := fetchRunnerProjectConfig(ctx, cfg, client, logger); err != nil {
-		logger.Warn("runner project config fetch failed", "error", err)
+	if registeredNow {
+		if err := fetchRunnerProjectConfig(ctx, cfg, client, logger); err != nil {
+			logger.Warn("runner project config fetch failed", "error", err)
+		}
 	}
 	if err := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusOnline), ""); err != nil {
 		health.set(false)
@@ -564,11 +567,11 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 	}
 }
 
-func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) (runnerConfig, error) {
+func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) (runnerConfig, bool, error) {
 	if strings.TrimSpace(cfg.RunnerAuthToken) != "" {
 		cfg.RegistrationToken = ""
 		logger.Info("runner using persisted auth token", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
-		return cfg, nil
+		return cfg, false, nil
 	}
 	payload := domain.RunnerRegistrationRequest{
 		ProjectID:         cfg.ProjectID,
@@ -582,18 +585,18 @@ func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http
 	}
 	var response domain.RunnerRegistrationResponse
 	if err := runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/register", "", payload, &response); err != nil {
-		return cfg, err
+		return cfg, false, err
 	}
 	token := strings.TrimSpace(response.RunnerAuthToken)
 	if token == "" {
-		return cfg, fmt.Errorf("runner registration response did not include runnerAuthToken")
+		return cfg, false, fmt.Errorf("runner registration response did not include runnerAuthToken")
 	}
 	if err := persistRuntimeToken(cfg.RunnerAuthTokenFile, token); err != nil {
-		return cfg, fmt.Errorf("persist runner auth token: %w", err)
+		return cfg, false, fmt.Errorf("persist runner auth token: %w", err)
 	}
 	cfg.RunnerAuthToken = token
 	cfg.RegistrationToken = ""
-	return cfg, nil
+	return cfg, true, nil
 }
 
 func fetchRunnerProjectConfig(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) error {
@@ -735,6 +738,70 @@ func getenvInt(key string, fallback int) int {
 	return parsed
 }
 
+func waitForPostgres(ctx context.Context, db *sql.DB, timeout time.Duration, interval time.Duration, logger *slog.Logger) error {
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		pingCtx, pingCancel := context.WithTimeout(deadline, 5*time.Second)
+		lastErr = db.PingContext(pingCtx)
+		pingCancel()
+		if lastErr == nil {
+			if attempt > 1 {
+				logger.Info("postgres dependency ready", "attempt", attempt)
+			}
+			return nil
+		}
+		if deadline.Err() != nil {
+			return lastErr
+		}
+		logger.Warn("postgres dependency not ready", "attempt", attempt, "error", lastErr)
+		select {
+		case <-deadline.Done():
+			return lastErr
+		case <-time.After(interval):
+		}
+	}
+}
+
+func waitForRedisQueue(ctx context.Context, queue *redisqueue.Queue, timeout time.Duration, interval time.Duration, logger *slog.Logger) error {
+	if timeout <= 0 {
+		timeout = 120 * time.Second
+	}
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	deadline, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	var lastErr error
+	for attempt := 1; ; attempt++ {
+		pingCtx, pingCancel := context.WithTimeout(deadline, 5*time.Second)
+		lastErr = queue.Ping(pingCtx)
+		pingCancel()
+		if lastErr == nil {
+			if attempt > 1 {
+				logger.Info("redis dependency ready", "attempt", attempt)
+			}
+			return nil
+		}
+		if deadline.Err() != nil {
+			return lastErr
+		}
+		logger.Warn("redis dependency not ready", "attempt", attempt, "error", lastErr)
+		select {
+		case <-deadline.Done():
+			return lastErr
+		case <-time.After(interval):
+		}
+	}
+}
+
 func discoverAgentCapabilities(ctx context.Context, source agent.CapabilitySource, logger *slog.Logger) agent.ClusterCapabilities {
 	capabilities, err := source.DiscoverCapabilities(ctx)
 	if err != nil {
@@ -801,12 +868,11 @@ func runServer(logger *slog.Logger) {
 		defer func() {
 			_ = db.Close()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		if err := db.PingContext(ctx); err != nil {
-			cancel()
+		if err := waitForPostgres(context.Background(), db, cfg.DependencyWaitTimeout, cfg.DependencyWaitInterval, logger); err != nil {
 			logger.Error("failed to ping postgres", "error", err)
 			os.Exit(1)
 		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		if err := postgres.NewMigratorWithDir(db, cfg.PostgresMigrationsDir).Apply(ctx); err != nil {
 			cancel()
 			logger.Error("failed to apply postgres migrations", "error", err)
@@ -826,14 +892,11 @@ func runServer(logger *slog.Logger) {
 		defer func() {
 			_ = queue.Close()
 		}()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := queue.Ping(ctx); err != nil {
-			cancel()
+		if err := waitForRedisQueue(context.Background(), queue, cfg.DependencyWaitTimeout, cfg.DependencyWaitInterval, logger); err != nil {
 			logger.Error("failed to ping redis", "error", err)
 			os.Exit(1)
 		}
 		redisJobsQueue = queue
-		cancel()
 		logger.Info("redis queue foundation ready")
 	}
 
