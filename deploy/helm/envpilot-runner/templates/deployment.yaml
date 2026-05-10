@@ -1,0 +1,154 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "envpilot-runner.fullname" . }}
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "envpilot-runner.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "envpilot-runner.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "envpilot-runner.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.dependencyWait.enabled }}
+      initContainers:
+        - name: wait-control-plane
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
+          command:
+            - sh
+            - -ec
+            - |
+              until wget -q -O- {{ trimSuffix "/" .Values.controlPlane.url }}{{ default "/api/v1/health" .Values.dependencyWait.healthPath }} >/dev/null; do
+                echo "waiting for control-plane"
+                sleep 2
+              done
+      {{- end }}
+      containers:
+        - name: runner
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          env:
+            - name: ENVPILOT_CONTROL_PLANE_URL
+              value: {{ .Values.controlPlane.url | quote }}
+            - name: ENVPILOT_CLUSTER_ID
+              value: {{ default .Release.Name .Values.project.clusterId | quote }}
+            - name: ENVPILOT_PROJECT_ID
+              value: {{ .Values.project.id | quote }}
+            - name: ENVPILOT_RUNNER_ID
+              value: {{ default (include "envpilot-runner.fullname" .) .Values.project.runnerId | quote }}
+            - name: ENVPILOT_RUNNER_NAMESPACE
+              value: {{ .Values.project.namespace | quote }}
+            - name: ENVPILOT_RUNNER_DEPLOYMENT_MODE
+              value: {{ .Values.project.deploymentMode | quote }}
+            - name: ENVPILOT_PROJECT_CONFIG_URL
+              value: {{ .Values.project.configUrl | quote }}
+            {{- if or .Values.controlPlane.existingSecret (and .Values.controlPlane.configToken .Values.controlPlane.allowUnsafePlaintextTokens) }}
+            - name: ENVPILOT_PROJECT_CONFIG_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "envpilot-runner.tokenSecretName" . }}
+                  key: {{ .Values.controlPlane.configTokenKey }}
+            {{- end }}
+            - name: ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS
+              value: {{ .Values.controlPlane.heartbeatIntervalSeconds | quote }}
+            - name: ENVPILOT_RUNNER_HEALTH_CHECK_URL
+              value: "/health"
+            {{- if .Values.controlPlane.authPersistence.existingSecret }}
+            - name: ENVPILOT_RUNNER_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controlPlane.authPersistence.existingSecret | quote }}
+                  key: {{ .Values.controlPlane.authPersistence.runnerAuthTokenKey | quote }}
+            {{- end }}
+            {{- if .Values.controlPlane.authPersistence.enabled }}
+            - name: ENVPILOT_RUNNER_AUTH_TOKEN_FILE
+              value: {{ printf "%s/%s" .Values.controlPlane.authPersistence.mountPath .Values.controlPlane.authPersistence.fileName | quote }}
+            {{- end }}
+            {{- if or .Values.controlPlane.existingSecret (and .Values.controlPlane.token .Values.controlPlane.allowUnsafePlaintextTokens) }}
+            - name: ENVPILOT_RUNNER_REGISTRATION_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "envpilot-runner.tokenSecretName" . }}
+                  key: {{ .Values.controlPlane.tokenKey }}
+            {{- end }}
+          {{- if .Values.controlPlane.authPersistence.enabled }}
+          volumeMounts:
+            - name: {{ .Values.controlPlane.authPersistence.volumeName }}
+              mountPath: {{ .Values.controlPlane.authPersistence.mountPath | quote }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.service.targetPort }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- if .Values.controlPlane.authPersistence.enabled }}
+      volumes:
+        - name: {{ .Values.controlPlane.authPersistence.volumeName }}
+          {{- if .Values.controlPlane.authPersistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.controlPlane.authPersistence.existingClaim | quote }}
+          {{- else if .Values.controlPlane.authPersistence.createClaim }}
+          persistentVolumeClaim:
+            claimName: {{ default (printf "%s-auth" (include "envpilot-runner.fullname" .)) .Values.controlPlane.authPersistence.claimName | quote }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

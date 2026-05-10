@@ -79,6 +79,23 @@ type Server struct {
 
 var requestDurationBuckets = []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10}
 
+type apiEnvironmentResponse struct {
+	domain.Environment
+	DeploymentBackend string                          `json:"deploymentBackend"`
+	DeploymentStatus  *apiEnvironmentDeploymentStatus `json:"deploymentStatus,omitempty"`
+}
+
+type apiEnvironmentDeploymentStatus struct {
+	Backend string                    `json:"backend"`
+	Flux    *domain.FluxStatus        `json:"fluxStatus,omitempty"`
+	Helm    *apiEnvironmentHelmStatus `json:"helmDirectStatus,omitempty"`
+}
+
+type apiEnvironmentHelmStatus struct {
+	Status string `json:"status"`
+	Ready  bool   `json:"ready"`
+}
+
 var ErrBootstrapIdentityMismatch = store.ErrBootstrapIdentityMismatch
 
 type pendingRegistrationToken struct {
@@ -171,6 +188,7 @@ const (
 	bootstrapServiceEnvsKey                    = "serviceEnvs"
 	bootstrapResourceScanTaskKey               = "resourceScanTask"
 	bootstrapManifestTemplatesKey              = "manifestTemplates"
+	bootstrapDeploymentConfigKey               = "deployment"
 )
 
 type serverMetrics struct {
@@ -2273,6 +2291,16 @@ func (s *Server) validateBootstrapSessionForCompilation(project domain.Project, 
 	if err != nil {
 		return domain.BootstrapSession{}, bootstrap.ManifestTemplateValidationResult{}, err
 	}
+	backend, backendErr := bootstrapSessionDeploymentBackend(session.Data)
+	if backendErr != nil {
+		return domain.BootstrapSession{}, bootstrap.ManifestTemplateValidationResult{}, backendErr
+	}
+	if backend == domain.DeploymentBackendFluxCD {
+		report, ok := asCapabilityReport(session.Data[bootstrapCapabilityReportKey])
+		if !ok || !hasFluxCapabilities(report) {
+			return domain.BootstrapSession{}, bootstrap.ManifestTemplateValidationResult{}, app.ValidationError{Message: "fluxcd backend requires Flux capabilities in cluster capability report"}
+		}
+	}
 	if policy, ok, parseErr := bootstrapResourcePolicyFromData(session.Data); parseErr != nil {
 		return domain.BootstrapSession{}, bootstrap.ManifestTemplateValidationResult{}, app.ValidationError{Message: fmt.Sprintf("invalid resource policy: %v", parseErr)}
 	} else if ok {
@@ -2316,6 +2344,34 @@ func (s *Server) saveCompiledProjectConfig(r *http.Request, project domain.Proje
 	}
 	s.writeProjectConfigAuditLog(r, project.ID, rawSession.ID, config.Version)
 	return nil
+}
+
+func bootstrapSessionDeploymentBackend(data map[string]any) (domain.DeploymentBackend, error) {
+	rawDeployment, ok := asStringAnyMap(data[bootstrapDeploymentConfigKey])
+	if !ok {
+		rawDeployment = map[string]any{}
+	}
+	backend := domain.InferDeploymentBackend(rawDeployment["backend"], rawDeployment, data)
+	switch backend {
+	case domain.DeploymentBackendHelmDirect, domain.DeploymentBackendFluxCD, domain.DeploymentBackendGitOpsManifest:
+		return backend, nil
+	case "":
+		return domain.DeploymentBackendHelmDirect, nil
+	default:
+		return backend, app.ValidationError{Message: fmt.Sprintf("unsupported deployment.backend: %q", backend)}
+	}
+}
+
+func hasFluxCapabilities(report domain.ClusterCapabilityReport) bool {
+	if len(report.FluxCRDs) > 0 {
+		return true
+	}
+	for _, flag := range report.CapabilityFlags {
+		if strings.Contains(strings.ToLower(strings.TrimSpace(flag)), "flux") {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) getProjectConfig(w http.ResponseWriter, r *http.Request) {
@@ -4568,7 +4624,11 @@ func (s *Server) listEnvironments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	items = s.filterEnvironmentsForRequest(r, items)
-	writeJSON(w, http.StatusOK, items)
+	decorated := make([]apiEnvironmentResponse, 0, len(items))
+	for _, item := range items {
+		decorated = append(decorated, s.decorateEnvironmentForAPI(item))
+	}
+	writeJSON(w, http.StatusOK, decorated)
 }
 
 func (s *Server) listEnvironmentRecords(w http.ResponseWriter, r *http.Request) {
@@ -4591,7 +4651,57 @@ func (s *Server) getEnvironment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, fmt.Errorf("project access denied"))
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	resp := s.decorateEnvironmentForAPI(item)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func (s *Server) decorateEnvironmentForAPI(env domain.Environment) apiEnvironmentResponse {
+	backend := deploymentBackendFromProjectConfigs(s.projectConfigs, env.Project)
+	response := apiEnvironmentResponse{
+		Environment:       env,
+		DeploymentBackend: string(backend),
+	}
+	response.DeploymentStatus = buildAPIEnvironmentDeploymentStatus(env, backend)
+	return response
+}
+
+func deploymentBackendFromProjectConfigs(projectConfigs interface {
+	Latest(string) (domain.ProjectConfig, error)
+}, projectID string) domain.DeploymentBackend {
+	if projectConfigs == nil || strings.TrimSpace(projectID) == "" {
+		return domain.DeploymentBackendHelmDirect
+	}
+	projectConfig, err := projectConfigs.Latest(projectID)
+	if err != nil {
+		return domain.DeploymentBackendHelmDirect
+	}
+	rawDeployment, ok := projectConfig.Config["deployment"]
+	if !ok {
+		return domain.InferDeploymentBackend("", map[string]any{}, projectConfig.Config)
+	}
+	deployment, ok := rawDeployment.(map[string]any)
+	if !ok {
+		return domain.InferDeploymentBackend("", map[string]any{}, projectConfig.Config)
+	}
+	return domain.InferDeploymentBackend(deployment["backend"], deployment, projectConfig.Config)
+}
+
+func buildAPIEnvironmentDeploymentStatus(env domain.Environment, backend domain.DeploymentBackend) *apiEnvironmentDeploymentStatus {
+	switch backend {
+	case domain.DeploymentBackendFluxCD:
+		return &apiEnvironmentDeploymentStatus{
+			Backend: string(backend),
+			Flux:    env.FluxStatus,
+		}
+	default:
+		return &apiEnvironmentDeploymentStatus{
+			Backend: string(backend),
+			Helm: &apiEnvironmentHelmStatus{
+				Status: string(env.Status),
+				Ready:  env.Status == domain.StatusReady,
+			},
+		}
+	}
 }
 
 func (s *Server) createEnvironment(w http.ResponseWriter, r *http.Request) {

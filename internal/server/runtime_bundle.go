@@ -21,11 +21,11 @@ import (
 const runtimeBundleFixedTimestamp = "2026-05-03T00:00:00Z"
 
 var runtimeBundleRunnerAssets = map[string]string{
-	"runner/runner-helm-values.yaml": "deploy/helm/envpilot-runner/values.yaml",
-	"runner/deployment.yaml":         "deploy/helm/envpilot-runner/templates/deployment.yaml",
-	"runner/rbac.yaml":               "deploy/helm/envpilot-runner/templates/rbac.yaml",
-	"runner/serviceaccount.yaml":     "deploy/helm/envpilot-runner/templates/serviceaccount.yaml",
-	"runner/NOTES.txt":               "deploy/helm/envpilot-runner/templates/NOTES.txt",
+	"runner/runner-helm-values.yaml": "deploy/deploy/helm/envpilot-runner/values.yaml",
+	"runner/deployment.yaml":         "deploy/deploy/helm/envpilot-runner/templates/deployment.yaml",
+	"runner/rbac.yaml":               "deploy/deploy/helm/envpilot-runner/templates/rbac.yaml",
+	"runner/serviceaccount.yaml":     "deploy/deploy/helm/envpilot-runner/templates/serviceaccount.yaml",
+	"runner/NOTES.txt":               "deploy/deploy/helm/envpilot-runner/templates/NOTES.txt",
 }
 
 type projectRuntimeBundleFile struct {
@@ -259,6 +259,7 @@ func runtimeBundleRunnerTemplateFiles() ([]projectRuntimeBundleFile, error) {
 func readRuntimeBundleRunnerTemplate(pathName string) ([]byte, error) {
 	candidates := []string{
 		filepath.Clean(pathName),
+		filepath.Clean(filepath.Join("..", pathName)),
 		filepath.Clean(filepath.Join("..", "..", pathName)),
 		filepath.Clean(filepath.Join("..", "..", "..", pathName)),
 	}

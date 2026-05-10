@@ -22,18 +22,19 @@ import (
 )
 
 type EnvironmentService struct {
-	cfg      config.Config
-	catalog  catalog.Catalog
-	store    store.EnvironmentStore
-	projects store.ProjectStore
-	products productProvider
-	settings settingsProvider
-	renderer gitops.Renderer
-	writer   gitops.Writer
-	orch     *orchestrator.EnvironmentOrchestrator
-	comment  scmcomment.Commenter
-	notifier environmentNotifier
-	now      func() time.Time
+	cfg            config.Config
+	catalog        catalog.Catalog
+	store          store.EnvironmentStore
+	projects       store.ProjectStore
+	projectConfigs store.ProjectConfigStore
+	products       productProvider
+	settings       settingsProvider
+	renderer       gitops.Renderer
+	writer         gitops.Writer
+	orch           *orchestrator.EnvironmentOrchestrator
+	comment        scmcomment.Commenter
+	notifier       environmentNotifier
+	now            func() time.Time
 }
 
 type productProvider interface {
@@ -50,14 +51,21 @@ type environmentNotifier interface {
 }
 
 func NewEnvironmentService(cfg config.Config, catalog catalog.Catalog, envStore store.EnvironmentStore, renderer gitops.Renderer, writer gitops.Writer) *EnvironmentService {
+	defaultBackend := orchestrator.NormalizeDeploymentBackendType(cfg.DeploymentBackend)
 	return &EnvironmentService{
 		cfg:      cfg,
 		catalog:  catalog,
 		store:    envStore,
 		renderer: renderer,
 		writer:   writer,
-		orch:     orchestrator.New(envStore, renderer, writer),
-		comment:  noopCommenter{},
+		orch: orchestrator.NewWithBackendResolver(envStore, func(projectConfig domain.ProjectConfig) (orchestrator.DeploymentBackend, error) {
+			backendType := defaultBackend
+			if projectBackend := deploymentBackendFromProjectConfig(projectConfig); projectBackend != "" {
+				backendType = orchestrator.NormalizeDeploymentBackendType(projectBackend)
+			}
+			return orchestrator.ResolveDeploymentBackend(backendType, renderer)
+		}, writer),
+		comment: noopCommenter{},
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -74,6 +82,10 @@ func (s *EnvironmentService) SetCommenter(commenter scmcomment.Commenter) {
 
 func (s *EnvironmentService) SetProjectStore(projectStore store.ProjectStore) {
 	s.projects = projectStore
+}
+
+func (s *EnvironmentService) SetProjectConfigStore(projectConfigStore store.ProjectConfigStore) {
+	s.projectConfigs = projectConfigStore
 }
 
 func (s *EnvironmentService) SetProductProvider(provider productProvider) {
@@ -201,7 +213,11 @@ func (s *EnvironmentService) CreateEnvironment(ctx context.Context, req domain.C
 	if err != nil {
 		return domain.Environment{}, err
 	}
-	created, err := s.orch.CreateWithWriter(ctx, env, writer)
+	projectConfig, err := s.projectConfigForProject(env.Project)
+	if err != nil {
+		return domain.Environment{}, err
+	}
+	created, err := s.orch.CreateWithWriterAndProjectConfig(ctx, env, writer, projectConfig)
 	if err == nil {
 		s.commentEnvironment(ctx, created)
 		s.notifyEnvironment(ctx, created)
@@ -228,7 +244,47 @@ func (s *EnvironmentService) DeleteEnvironment(ctx context.Context, id string, f
 	if err != nil {
 		return domain.Environment{}, err
 	}
-	return s.orch.DeleteWithWriter(ctx, id, writer)
+	projectConfig, err := s.projectConfigForProject(env.Project)
+	if err != nil {
+		return domain.Environment{}, err
+	}
+	return s.orch.DeleteWithWriterAndProjectConfig(ctx, id, writer, projectConfig)
+}
+
+func (s *EnvironmentService) projectConfigForProject(projectID string) (domain.ProjectConfig, error) {
+	if s.projectConfigs == nil {
+		return domain.ProjectConfig{}, nil
+	}
+	rawConfig, err := s.projectConfigs.Latest(projectID)
+	if errors.Is(err, store.ErrProjectConfigNotFound) {
+		return domain.ProjectConfig{}, nil
+	}
+	if err != nil {
+		return domain.ProjectConfig{}, err
+	}
+	return rawConfig, nil
+}
+
+func deploymentBackendFromProjectConfig(projectConfig domain.ProjectConfig) string {
+	if len(projectConfig.Config) == 0 {
+		return ""
+	}
+	rawDeployment, ok := projectConfig.Config["deployment"]
+	if !ok {
+		backend := domain.InferDeploymentBackend("", map[string]any{}, projectConfig.Config)
+		if backend == domain.DeploymentBackendHelmDirect {
+			return ""
+		}
+		return string(backend)
+	}
+	rawDeploymentMap, ok := rawDeployment.(map[string]any)
+	if !ok {
+		return ""
+	}
+	if len(rawDeploymentMap) == 0 {
+		return ""
+	}
+	return string(domain.InferDeploymentBackend(rawDeploymentMap["backend"], rawDeploymentMap, projectConfig.Config))
 }
 
 func (s *EnvironmentService) validateCleanupSafety(env domain.Environment) error {

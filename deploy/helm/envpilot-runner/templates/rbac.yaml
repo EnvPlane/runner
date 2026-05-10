@@ -1,0 +1,294 @@
+{{- define "envpilot-runner.featureEnvWriterRBAC" -}}
+{{- $root := .root -}}
+{{- $fullName := .fullName -}}
+{{- $serviceAccountName := .serviceAccountName -}}
+{{- $writerNamespace := .namespace -}}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-feature-env-writer
+  namespace: {{ $writerNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" $root | nindent 4 }}
+  {{- with $root.Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - events
+      - services
+      - resourcequotas
+      - limitranges
+      - persistentvolumeclaims
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - replicasets
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  {{- if $root.Values.rbac.featureEnvWriter.allowNetworkPolicies }}
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - networkpolicies
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  {{- end }}
+  {{- if $root.Values.rbac.featureEnvWriter.allowFluxResources }}
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources:
+      - helmreleases
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources:
+      - kustomizations
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources:
+      - gitrepositories
+    verbs: ["get","list","watch","create","update","patch","delete"]
+  {{- end }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullName }}-feature-env-writer
+  namespace: {{ $writerNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" $root | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ $root.Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullName }}-feature-env-writer
+{{- end -}}
+{{- if .Values.rbac.create -}}
+{{- $fullName := include "envpilot-runner.fullname" . -}}
+{{- $serviceAccountName := include "envpilot-runner.serviceAccountName" . -}}
+{{- $discoveryScope := default "cluster" .Values.rbac.discovery.scope -}}
+{{- $discoveryNamespace := default .Release.Namespace .Values.rbac.discovery.namespace -}}
+{{- $writerMode := default "releaseNamespace" .Values.rbac.featureEnvWriter.mode -}}
+{{- $secretNamespace := default .Release.Namespace .Values.rbac.secretManager.namespace -}}
+{{- if eq $discoveryScope "namespace" }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-discovery-reader
+  namespace: {{ $discoveryNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+  {{- with .Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - services
+      - configmaps
+      - events
+      - serviceaccounts
+      - persistentvolumeclaims
+    verbs: ["get","list","watch"]
+  {{- if .Values.rbac.discovery.readSecrets }}
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs: ["get","list","watch"]
+  {{- end }}
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - replicasets
+      - daemonsets
+    verbs: ["get","list","watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get","list","watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["get","list","watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources:
+      - helmreleases
+    verbs: ["get","list","watch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources:
+      - kustomizations
+    verbs: ["get","list","watch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources:
+      - gitrepositories
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullName }}-discovery-reader
+  namespace: {{ $discoveryNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullName }}-discovery-reader
+{{- else }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $fullName }}-discovery-reader
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+  {{- with .Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - pods
+      - services
+      - configmaps
+      - events
+      - serviceaccounts
+      - persistentvolumeclaims
+    verbs: ["get","list","watch"]
+  {{- if .Values.rbac.discovery.readSecrets }}
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs: ["get","list","watch"]
+  {{- end }}
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - statefulsets
+      - replicasets
+      - daemonsets
+    verbs: ["get","list","watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get","list","watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: ["get","list","watch"]
+  - apiGroups: ["helm.toolkit.fluxcd.io"]
+    resources:
+      - helmreleases
+    verbs: ["get","list","watch"]
+  - apiGroups: ["kustomize.toolkit.fluxcd.io"]
+    resources:
+      - kustomizations
+    verbs: ["get","list","watch"]
+  - apiGroups: ["source.toolkit.fluxcd.io"]
+    resources:
+      - gitrepositories
+    verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $fullName }}-discovery-reader
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ $fullName }}-discovery-reader
+{{ end }}
+{{ if .Values.rbac.featureEnvWriter.enabled }}
+{{ if eq $writerMode "releaseNamespace" }}
+{{ $writerNamespace := default .Release.Namespace .Values.rbac.featureEnvWriter.namespace -}}
+{{ include "envpilot-runner.featureEnvWriterRBAC" (dict "root" . "fullName" $fullName "serviceAccountName" $serviceAccountName "namespace" $writerNamespace) }}
+{{- else if eq $writerMode "preconfiguredNamespaces" }}
+{{- if not .Values.rbac.featureEnvWriter.namespaces }}
+{{- fail "rbac.featureEnvWriter.namespaces must contain at least one namespace when mode is preconfiguredNamespaces" }}
+{{- end }}
+{{- range $namespace := .Values.rbac.featureEnvWriter.namespaces }}
+{{- if $namespace }}
+{{ include "envpilot-runner.featureEnvWriterRBAC" (dict "root" $ "fullName" $fullName "serviceAccountName" $serviceAccountName "namespace" $namespace) }}
+{{- end }}
+{{- end }}
+{{- else if eq $writerMode "generatedFeatureNamespaces" }}
+{{- if not .Values.rbac.featureEnvWriter.generatedNamespaces }}
+{{- fail "rbac.featureEnvWriter.generatedNamespaces must contain at least one namespace when mode is generatedFeatureNamespaces" }}
+{{- end }}
+{{- range $namespace := .Values.rbac.featureEnvWriter.generatedNamespaces }}
+{{- if $namespace }}
+{{ include "envpilot-runner.featureEnvWriterRBAC" (dict "root" $ "fullName" $fullName "serviceAccountName" $serviceAccountName "namespace" $namespace) }}
+{{- end }}
+{{- end }}
+{{- else }}
+{{- fail (printf "unsupported rbac.featureEnvWriter.mode %q" $writerMode) }}
+{{- end }}
+{{- end }}
+{{- if .Values.rbac.secretManager.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $fullName }}-secret-manager
+  namespace: {{ $secretNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+  {{- with .Values.rbac.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+rules:
+  - apiGroups: [""]
+    resources:
+      - secrets
+    verbs: ["get","list","watch","create","update","patch","delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $fullName }}-secret-manager
+  namespace: {{ $secretNamespace }}
+  labels:
+    {{- include "envpilot-runner.labels" . | nindent 4 }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $fullName }}-secret-manager
+{{- end }}
+{{- end }}

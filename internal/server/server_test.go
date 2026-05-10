@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -34,10 +35,30 @@ import (
 	"envpilot/internal/store"
 )
 
+func testRepoRoot() string {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return ".."
+	}
+	return filepath.Join(filepath.Dir(file), "..", "..", "..")
+}
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "fluxcd")
+	os.Exit(m.Run())
+}
+
 type fakeRoundTripper func(*http.Request) (*http.Response, error)
 
 func (f fakeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 	return f(r)
+}
+
+func requireHTTPServer(t *testing.T) {
+	t.Helper()
+	if os.Getenv("ENVPILOT_RUN_HTTP_TESTS") != "1" && os.Getenv("ENVPILOT_RUN_NET_TESTS") != "1" {
+		t.Skip("HTTP test server binding is disabled. Set ENVPILOT_RUN_HTTP_TESTS=1 (or ENVPILOT_RUN_NET_TESTS=1) to run.")
+	}
 }
 
 func TestGitHubWebhookRejectsInvalidSignature(t *testing.T) {
@@ -743,6 +764,7 @@ func TestGitHubOAuthLoginRedirectsToProvider(t *testing.T) {
 }
 
 func TestGitLabOAuthCallbackCreatesSessionAcceptedByAPI(t *testing.T) {
+	requireHTTPServer(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/oauth/token":
@@ -843,6 +865,7 @@ func TestOIDCOAuthLoginRedirectsToProvider(t *testing.T) {
 }
 
 func TestOIDCOAuthCallbackCreatesSessionAcceptedByAPI(t *testing.T) {
+	requireHTTPServer(t)
 	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/oauth/token":
@@ -1962,6 +1985,265 @@ func TestBootstrapSessionCompileEndpointCompilesSavedSession(t *testing.T) {
 	}
 	if response.Status != "compiled" {
 		t.Fatalf("expected compiled status, got %q", response.Status)
+	}
+}
+
+func TestBootstrapSessionDeploymentBackendSelectionPersistsInSessionAndProjectConfig(t *testing.T) {
+	application, _, _ := newTestServer(t, "")
+	if _, err := application.projects.SaveProject(domain.Project{
+		ID:                 "bootstrap-compile-deployment-backend-persist",
+		Name:               "Bootstrap Compile Deployment Backend Persist",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/acme/app",
+		GitOpsRepositoryID: "github.com/acme/gitops",
+	}); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-deployment-backend-persist/bootstrap-session", nil)
+	createRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create session status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	updateBody := []byte(`{
+	  "current_step": 9,
+	  "status": "reviewed",
+	  "step_data": {
+	    "deployment": {
+	      "backend": "helm_direct",
+	      "helmDirect": {
+	        "chartRef": "deploy/helm/checkout",
+	        "releaseNamePattern": "checkout-pr-{{ .PRNumber }}",
+	        "namespacePattern": "envpilot-pr-{{ .PRNumber }}",
+	        "timeout": 420,
+	        "wait": false,
+	        "createNamespace": false,
+	        "valuesOverrideStrategy": "set",
+	        "imageTagValuePath": "image.tag"
+	      }
+	    },
+	    "manifestTemplates": [{
+	      "kind": "Deployment",
+	      "namespace": "envpilot-pr-{{ .PRNumber }}",
+	      "name": "orders",
+	      "yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\n  namespace: envpilot-pr-{{ .PRNumber }}\nspec:\n  template:\n    spec:\n      containers:\n      - name: orders\n        image: ghcr.io/acme/orders:{{ .CommitSHA }}\n"
+	    }]
+	  }
+	}`)
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/projects/bootstrap-compile-deployment-backend-persist/bootstrap-session", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update session status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/projects/bootstrap-compile-deployment-backend-persist/bootstrap-session", nil)
+	getRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(getRec, getReq)
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("get session status=%d body=%s", getRec.Code, getRec.Body.String())
+	}
+	var session map[string]any
+	if err := json.Unmarshal(getRec.Body.Bytes(), &session); err != nil {
+		t.Fatalf("decode get session: %v", err)
+	}
+	sessionData, ok := session["data"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing session data: %#v", session)
+	}
+	deployment, ok := sessionData["deployment"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing deployment block in session data: %#v", sessionData)
+	}
+	backendRaw, ok := deployment["backend"].(string)
+	if !ok || strings.TrimSpace(backendRaw) != domain.DeploymentBackendHelmDirect {
+		t.Fatalf("expected session deployment backend %q, got %#v", domain.DeploymentBackendHelmDirect, deployment["backend"])
+	}
+
+	compileReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-deployment-backend-persist/bootstrap-session/compile", nil)
+	compileRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(compileRec, compileReq)
+	if compileRec.Code != http.StatusOK {
+		t.Fatalf("compile session status=%d body=%s", compileRec.Code, compileRec.Body.String())
+	}
+	var compileResponse struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(compileRec.Body.Bytes(), &compileResponse); err != nil {
+		t.Fatalf("decode compile response: %v", err)
+	}
+	if compileResponse.Status != "compiled" {
+		t.Fatalf("expected compiled status, got %q", compileResponse.Status)
+	}
+
+	rawConfig, err := application.projectConfigs.Latest("bootstrap-compile-deployment-backend-persist")
+	if err != nil {
+		t.Fatalf("read project config: %v", err)
+	}
+	configDeployment, ok := rawConfig.Config["deployment"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected deployment in project config: %#v", rawConfig.Config)
+	}
+	configBackend, ok := configDeployment["backend"].(string)
+	if !ok || strings.TrimSpace(configBackend) != domain.DeploymentBackendHelmDirect {
+		t.Fatalf("expected project config deployment backend %q, got %#v", domain.DeploymentBackendHelmDirect, configDeployment["backend"])
+	}
+	helmDirect, ok := configDeployment["helmDirect"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected helmDirect config in project config: %#v", configDeployment)
+	}
+	namespaceMode, ok := helmDirect["namespaceMode"].(string)
+	if !ok || strings.TrimSpace(namespaceMode) == "" {
+		t.Fatalf("expected namespaceMode in helmDirect config: %#v", helmDirect)
+	}
+	if strings.TrimSpace(asString(helmDirect["chartRef"])) != "deploy/helm/checkout" {
+		t.Fatalf("expected chartRef=deploy/helm/checkout, got %#v", helmDirect["chartRef"])
+	}
+	if strings.TrimSpace(asString(helmDirect["releaseNamePattern"])) != "checkout-pr-{{ .PRNumber }}" {
+		t.Fatalf("expected releaseNamePattern, got %#v", helmDirect["releaseNamePattern"])
+	}
+	if strings.TrimSpace(asString(helmDirect["namespacePattern"])) != "envpilot-pr-{{ .PRNumber }}" {
+		t.Fatalf("expected namespacePattern, got %#v", helmDirect["namespacePattern"])
+	}
+	if strings.TrimSpace(asString(helmDirect["valuesOverrideStrategy"])) != "set" {
+		t.Fatalf("expected valuesOverrideStrategy set, got %#v", helmDirect["valuesOverrideStrategy"])
+	}
+	if strings.TrimSpace(asString(helmDirect["imageTagValuePath"])) != "image.tag" {
+		t.Fatalf("expected imageTagValuePath image.tag, got %#v", helmDirect["imageTagValuePath"])
+	}
+	if wait, ok := helmDirect["wait"].(bool); !ok || wait != false {
+		t.Fatalf("expected wait=false, got %#v", helmDirect["wait"])
+	}
+	if createNamespace, ok := helmDirect["createNamespace"].(bool); !ok || createNamespace != false {
+		t.Fatalf("expected createNamespace=false, got %#v", helmDirect["createNamespace"])
+	}
+	switch timeout := helmDirect["timeout"].(type) {
+	case int:
+		if timeout != 420 {
+			t.Fatalf("expected timeout=420, got %#v", helmDirect["timeout"])
+		}
+	case float64:
+		if timeout != 420 {
+			t.Fatalf("expected timeout=420, got %#v", helmDirect["timeout"])
+		}
+	default:
+		t.Fatalf("expected timeout=420 number, got %#v", helmDirect["timeout"])
+	}
+}
+
+func TestBootstrapSessionCompileAllowsHelmDirectWithoutFluxCapabilities(t *testing.T) {
+	application, _, _ := newTestServer(t, "")
+	if _, err := application.projects.SaveProject(domain.Project{
+		ID:                 "bootstrap-compile-helm-direct-no-flux",
+		Name:               "Bootstrap Compile Helm Direct Without Flux",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/acme/app",
+		GitOpsRepositoryID: "github.com/acme/gitops",
+	}); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-helm-direct-no-flux/bootstrap-session", nil)
+	createRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create session status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	updateBody := []byte(`{
+	  "current_step": 9,
+	  "status": "reviewed",
+	  "step_data": {
+	    "deployment": {
+	      "backend": "helm_direct"
+	    },
+	    "manifestTemplates": [{
+	      "kind": "Deployment",
+	      "namespace": "envpilot-pr-{{ .PRNumber }}",
+	      "name": "orders",
+	      "yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\n  namespace: envpilot-pr-{{ .PRNumber }}\nspec:\n  template:\n    spec:\n      containers:\n      - name: orders\n        image: ghcr.io/acme/orders:{{ .CommitSHA }}\n"
+	    }]
+	  }
+	}`)
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/projects/bootstrap-compile-helm-direct-no-flux/bootstrap-session", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update session status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	compileReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-helm-direct-no-flux/bootstrap-session/compile", nil)
+	compileRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(compileRec, compileReq)
+	if compileRec.Code != http.StatusOK {
+		t.Fatalf("compile session status=%d body=%s", compileRec.Code, compileRec.Body.String())
+	}
+	var response struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(compileRec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode compile response: %v", err)
+	}
+	if response.Status != "compiled" {
+		t.Fatalf("expected compiled status, got %q", response.Status)
+	}
+}
+
+func TestBootstrapSessionCompileRejectsFluxWithoutFluxCapabilities(t *testing.T) {
+	application, _, _ := newTestServer(t, "")
+	if _, err := application.projects.SaveProject(domain.Project{
+		ID:                 "bootstrap-compile-flux-no-flux",
+		Name:               "Bootstrap Compile Flux Without Flux",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/acme/app",
+		GitOpsRepositoryID: "github.com/acme/gitops",
+	}); err != nil {
+		t.Fatalf("save project: %v", err)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-flux-no-flux/bootstrap-session", nil)
+	createRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusOK {
+		t.Fatalf("create session status=%d body=%s", createRec.Code, createRec.Body.String())
+	}
+
+	updateBody := []byte(`{
+	  "current_step": 9,
+	  "status": "reviewed",
+	  "step_data": {
+	    "deployment": {
+	      "backend": "fluxcd"
+	    },
+	    "clusterCapabilityReport": {},
+	    "manifestTemplates": [{
+	      "kind": "Deployment",
+	      "namespace": "envpilot-pr-{{ .PRNumber }}",
+	      "name": "orders",
+	      "yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: orders\n  namespace: envpilot-pr-{{ .PRNumber }}\nspec:\n  template:\n    spec:\n      containers:\n      - name: orders\n        image: ghcr.io/acme/orders:{{ .CommitSHA }}\n"
+	    }]
+	  }
+	}`)
+	updateReq := httptest.NewRequest(http.MethodPatch, "/api/projects/bootstrap-compile-flux-no-flux/bootstrap-session", bytes.NewReader(updateBody))
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(updateRec, updateReq)
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("update session status=%d body=%s", updateRec.Code, updateRec.Body.String())
+	}
+
+	compileReq := httptest.NewRequest(http.MethodPost, "/api/projects/bootstrap-compile-flux-no-flux/bootstrap-session/compile", nil)
+	compileRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(compileRec, compileReq)
+	if compileRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d body=%s", compileRec.Code, compileRec.Body.String())
+	}
+	if !strings.Contains(compileRec.Body.String(), "fluxcd backend requires Flux capabilities") {
+		t.Fatalf("expected flux capabilities validation error, got %s", compileRec.Body.String())
 	}
 }
 
@@ -5940,7 +6222,7 @@ func TestBootstrapRunnerDeploymentInstructionsSupportHelmAndGitOpsModes(t *testi
 }
 
 func TestBootstrapWizardDoesNotRenderStandaloneRunnerTokens(t *testing.T) {
-	content, err := os.ReadFile(filepath.Join("..", "..", "apps", "frontend", "components", "bootstrap", "BootstrapWizardClient.tsx"))
+	content, err := os.ReadFile(filepath.Join(testRepoRoot(), "frontend", "components", "bootstrap", "BootstrapWizardClient.tsx"))
 	if err != nil {
 		t.Fatalf("read bootstrap wizard: %v", err)
 	}
@@ -7590,6 +7872,7 @@ func TestBootstrapSecurityLifecycleAgentRegisterHeartbeatResourceScan(t *testing
 }
 
 func TestBootstrapFullLifecycleAgentHTTPStatusReporterRegisterFetchReportAndRestart(t *testing.T) {
+	requireHTTPServer(t)
 	projectID := "bootstrap-http-reporter-agent"
 	agentID := "agent-http-reporter"
 	application, _, _ := newTestServer(t, "")
@@ -9325,6 +9608,324 @@ func TestEnvironmentFluxStatusEndpointStoresReconciliationStatus(t *testing.T) {
 	}
 }
 
+func TestGetEnvironmentReturnsFluxBackendDeploymentStatus(t *testing.T) {
+	application, envStore, _ := newTestServer(t, "")
+	_, err := application.projects.SaveProject(domain.Project{
+		ID:                 "cms",
+		Name:               "CMS",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/envpilot/cms",
+		GitOpsRepositoryID: "github.com/envpilot/cms-gitops",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	project, err := application.projects.GetProject("cms")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if _, err := application.projectConfigs.SaveFromBootstrapSession(project, domain.BootstrapSession{
+		ID:        "sess-flux-406",
+		ProjectID: "cms",
+		Status:    domain.BootstrapSessionStatusCompiled,
+		Data: map[string]any{
+			"deployment": map[string]any{
+				"backend": "fluxcd",
+				"fluxcd": map[string]any{
+					"gitopsRepo":        "https://github.com/example/flux-repo.git",
+					"gitopsPath":        "clusters/dev",
+					"fluxNamespace":     "flux-system",
+					"kustomizationName": "kan-406",
+					"commitMode":        "commit",
+				},
+			},
+		},
+	}, "test-user"); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	created, err := application.service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+		ID:      "kan-406",
+		Project: "cms",
+		Product: "bethunder",
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	created.FluxStatus = &domain.FluxStatus{
+		Status:    domain.StatusReady,
+		Message:   "flux ready",
+		UpdatedAt: time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+	}
+	if err := envStore.Save(created); err != nil {
+		t.Fatalf("save flux status on environment: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/environments/kan-406", nil)
+	rec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		DeploymentBackend string `json:"deploymentBackend"`
+		DeploymentStatus  *struct {
+			Backend          string             `json:"backend"`
+			FluxStatus       *domain.FluxStatus `json:"fluxStatus"`
+			HelmDirectStatus *struct {
+				Status string `json:"status"`
+				Ready  bool   `json:"ready"`
+			} `json:"helmDirectStatus"`
+		} `json:"deploymentStatus"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.DeploymentBackend != "fluxcd" {
+		t.Fatalf("expected fluxcd backend, got %q", payload.DeploymentBackend)
+	}
+	if payload.DeploymentStatus == nil || payload.DeploymentStatus.FluxStatus == nil {
+		t.Fatalf("expected flux deployment status section")
+	}
+	if payload.DeploymentStatus.Backend != "fluxcd" {
+		t.Fatalf("expected flux deployment status backend, got %q", payload.DeploymentStatus.Backend)
+	}
+	if payload.DeploymentStatus.HelmDirectStatus != nil {
+		t.Fatalf("expected helm status section to be absent for flux backend")
+	}
+}
+
+func TestGetEnvironmentReturnsHelmBackendDeploymentStatus(t *testing.T) {
+	application, envStore, _ := newTestServer(t, "")
+	_, err := application.projects.SaveProject(domain.Project{
+		ID:                 "cms",
+		Name:               "CMS",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/envpilot/cms",
+		GitOpsRepositoryID: "github.com/envpilot/cms-gitops",
+	})
+	if err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	project, err := application.projects.GetProject("cms")
+	if err != nil {
+		t.Fatalf("get project: %v", err)
+	}
+	if _, err := application.projectConfigs.SaveFromBootstrapSession(project, domain.BootstrapSession{
+		ID:        "sess-helm-407",
+		ProjectID: "cms",
+		Status:    domain.BootstrapSessionStatusCompiled,
+		Data: map[string]any{
+			"deployment": map[string]any{
+				"backend": "helm_direct",
+			},
+		},
+	}, "test-user"); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	created, err := application.service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+		ID:      "kan-407",
+		Project: "cms",
+		Product: "bethunder",
+	})
+	if err != nil {
+		t.Fatalf("create environment: %v", err)
+	}
+	created.Status = domain.StatusCreating
+	if err := envStore.Save(created); err != nil {
+		t.Fatalf("save environment: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/environments/kan-407", nil)
+	rec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		DeploymentBackend string `json:"deploymentBackend"`
+		DeploymentStatus  *struct {
+			Backend          string `json:"backend"`
+			HelmDirectStatus *struct {
+				Status string `json:"status"`
+				Ready  bool   `json:"ready"`
+			} `json:"helmDirectStatus"`
+			FluxStatus *domain.FluxStatus `json:"fluxStatus"`
+		} `json:"deploymentStatus"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.DeploymentBackend != "helm_direct" {
+		t.Fatalf("expected helm_direct backend, got %q", payload.DeploymentBackend)
+	}
+	if payload.DeploymentStatus == nil || payload.DeploymentStatus.HelmDirectStatus == nil {
+		t.Fatalf("expected helm deployment status section")
+	}
+	if payload.DeploymentStatus.Backend != "helm_direct" {
+		t.Fatalf("expected helm deployment status backend, got %q", payload.DeploymentStatus.Backend)
+	}
+	if payload.DeploymentStatus.HelmDirectStatus.Status != string(domain.StatusCreating) {
+		t.Fatalf("unexpected helm status %q", payload.DeploymentStatus.HelmDirectStatus.Status)
+	}
+	if payload.DeploymentStatus.FluxStatus != nil {
+		t.Fatalf("expected flux section to be absent for helm backend")
+	}
+}
+
+func TestListEnvironmentsIncludesBackendAndDeploymentStatus(t *testing.T) {
+	application, envStore, _ := newTestServer(t, "")
+	_, err := application.projects.SaveProject(domain.Project{
+		ID:                 "cms-flux",
+		Name:               "CMS Flux",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/envpilot/cms-flux",
+		GitOpsRepositoryID: "github.com/envpilot/cms-flux-gitops",
+	})
+	if err != nil {
+		t.Fatalf("create flux project: %v", err)
+	}
+	_, err = application.projects.SaveProject(domain.Project{
+		ID:                 "cms-helm",
+		Name:               "CMS Helm",
+		ProductID:          "bethunder",
+		AppRepositoryID:    "github.com/envpilot/cms-helm",
+		GitOpsRepositoryID: "github.com/envpilot/cms-helm-gitops",
+	})
+	if err != nil {
+		t.Fatalf("create helm project: %v", err)
+	}
+
+	projectFlux, err := application.projects.GetProject("cms-flux")
+	if err != nil {
+		t.Fatalf("get flux project: %v", err)
+	}
+	projectHelm, err := application.projects.GetProject("cms-helm")
+	if err != nil {
+		t.Fatalf("get helm project: %v", err)
+	}
+	if _, err := application.projectConfigs.SaveFromBootstrapSession(projectFlux, domain.BootstrapSession{
+		ID:        "sess-flux-list",
+		ProjectID: "cms-flux",
+		Status:    domain.BootstrapSessionStatusCompiled,
+		Data: map[string]any{
+			"deployment": map[string]any{
+				"backend": "fluxcd",
+				"fluxcd": map[string]any{
+					"gitopsRepo":        "https://github.com/example/flux-repo.git",
+					"gitopsPath":        "clusters/dev",
+					"fluxNamespace":     "flux-system",
+					"kustomizationName": "cms-flux",
+					"commitMode":        "commit",
+				},
+			},
+		},
+	}, "test-user"); err != nil {
+		t.Fatalf("save flux project config: %v", err)
+	}
+	if _, err := application.projectConfigs.SaveFromBootstrapSession(projectHelm, domain.BootstrapSession{
+		ID:        "sess-helm-list",
+		ProjectID: "cms-helm",
+		Status:    domain.BootstrapSessionStatusCompiled,
+		Data: map[string]any{
+			"deployment": map[string]any{
+				"backend": "helm_direct",
+			},
+		},
+	}, "test-user"); err != nil {
+		t.Fatalf("save helm project config: %v", err)
+	}
+
+	fluxEnv, err := application.service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+		ID:      "kan-flux",
+		Project: "cms-flux",
+		Product: "bethunder",
+	})
+	if err != nil {
+		t.Fatalf("create flux environment: %v", err)
+	}
+	fluxEnv.FluxStatus = &domain.FluxStatus{
+		Status:    domain.StatusReady,
+		Message:   "flux ready",
+		UpdatedAt: time.Date(2026, 5, 9, 12, 0, 0, 0, time.UTC),
+	}
+	if err := envStore.Save(fluxEnv); err != nil {
+		t.Fatalf("save flux env status: %v", err)
+	}
+
+	helmEnv, err := application.service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+		ID:      "kan-helm",
+		Project: "cms-helm",
+		Product: "bethunder",
+	})
+	if err != nil {
+		t.Fatalf("create helm environment: %v", err)
+	}
+	helmEnv.Status = domain.StatusCreating
+	if err := envStore.Save(helmEnv); err != nil {
+		t.Fatalf("save helm env status: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/environments", nil)
+	listRec := httptest.NewRecorder()
+	application.Routes().ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	var payload []struct {
+		ID                string `json:"id"`
+		Project           string `json:"project"`
+		DeploymentBackend string `json:"deploymentBackend"`
+		DeploymentStatus  *struct {
+			Backend          string             `json:"backend"`
+			FluxStatus       *domain.FluxStatus `json:"fluxStatus"`
+			HelmDirectStatus *struct {
+				Status string `json:"status"`
+				Ready  bool   `json:"ready"`
+			} `json:"helmDirectStatus"`
+		} `json:"deploymentStatus"`
+	}
+	if err := json.Unmarshal(listRec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode list environments: %v", err)
+	}
+	if len(payload) != 2 {
+		t.Fatalf("expected 2 environments, got %d", len(payload))
+	}
+	var fluxFound, helmFound bool
+	for _, item := range payload {
+		switch item.ID {
+		case "kan-flux":
+			fluxFound = true
+			if item.DeploymentBackend != "fluxcd" {
+				t.Fatalf("expected kan-flux backend fluxcd, got %q", item.DeploymentBackend)
+			}
+			if item.DeploymentStatus == nil || item.DeploymentStatus.FluxStatus == nil {
+				t.Fatalf("expected flux status for kan-flux")
+			}
+			if item.DeploymentStatus.HelmDirectStatus != nil {
+				t.Fatalf("expected missing helm status for kan-flux")
+			}
+		case "kan-helm":
+			helmFound = true
+			if item.DeploymentBackend != "helm_direct" {
+				t.Fatalf("expected kan-helm backend helm_direct, got %q", item.DeploymentBackend)
+			}
+			if item.DeploymentStatus == nil || item.DeploymentStatus.HelmDirectStatus == nil {
+				t.Fatalf("expected helm status for kan-helm")
+			}
+			if item.DeploymentStatus.FluxStatus != nil {
+				t.Fatalf("expected missing flux status for kan-helm")
+			}
+		}
+	}
+	if !fluxFound || !helmFound {
+		t.Fatalf("missing expected environments in list payload: flux=%t helm=%t", fluxFound, helmFound)
+	}
+}
+
 func TestPinUnpinEnvironmentEndpointsTogglePinnedState(t *testing.T) {
 	application, envStore, _ := newTestServer(t, "")
 	expiresAt := time.Date(2026, 5, 2, 12, 0, 0, 0, time.UTC)
@@ -9762,6 +10363,7 @@ func newTestServerWithSecrets(t *testing.T, githubSecret string, gitlabSecret st
 
 	tmp := t.TempDir()
 	cfg := config.FromEnv()
+	cfg.DeploymentBackend = "fluxcd"
 	cfg.DataDir = tmp
 	cfg.GitOpsDir = tmp
 	cfg.GitHubWebhookSecret = githubSecret

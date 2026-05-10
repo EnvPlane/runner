@@ -79,6 +79,37 @@ func TestFromEnvWithRuntimeFileErrorsForInvalidPath(t *testing.T) {
 	}
 }
 
+func TestDeploymentBackendFromEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		env  string
+		want string
+	}{
+		{name: "default", env: "", want: "helm_direct"},
+		{name: "gitops_manifest", env: "gitops_manifest", want: "gitops_manifest"},
+		{name: "gitops alias", env: "gitops", want: "gitops_manifest"},
+		{name: "fluxcd", env: "fluxcd", want: "fluxcd"},
+		{name: "flux alias", env: "flux", want: "fluxcd"},
+		{name: "flux legacy", env: "flux_cd", want: "fluxcd"},
+		{name: "helm_direct", env: "helm_direct", want: "helm_direct"},
+		{name: "helm alias", env: "helm-direct", want: "helm_direct"},
+		{name: "unknown", env: "unknown", want: "unknown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", tc.env)
+			got := DeploymentBackendFromEnv()
+			if got != tc.want {
+				t.Fatalf("env=%q got=%q want=%q", tc.env, got, tc.want)
+			}
+		})
+	}
+	t.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "GITOPS_MANIFEST")
+	if got := DeploymentBackendFromEnv(); got != "gitops_manifest" {
+		t.Fatalf("case-insensitive expected %q got %q", "gitops_manifest", got)
+	}
+}
+
 func writeRuntimeConfig(path string, content []byte) error {
 	return os.WriteFile(path, content, 0o600)
 }

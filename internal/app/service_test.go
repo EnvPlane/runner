@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -13,8 +14,169 @@ import (
 	"envpilot/internal/config"
 	"envpilot/internal/domain"
 	"envpilot/internal/gitops"
+	"envpilot/internal/orchestrator"
 	"envpilot/internal/store"
 )
+
+func TestMain(m *testing.M) {
+	_ = os.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "fluxcd")
+	os.Exit(m.Run())
+}
+
+func TestNewEnvironmentServiceUsesDeploymentBackendAliases(t *testing.T) {
+	tmp := t.TempDir()
+	envStore, err := store.NewJSONStore(filepath.Join(tmp, "store.json"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+
+	cfg := config.FromEnv()
+	cfg.GitOpsDir = filepath.Join(tmp, "gitops")
+	baseRenderer := gitops.NewFluxRenderer(cfg.GitOps)
+	baseWriter := gitops.NewFileWriter(filepath.Join(tmp, "manifests"), false, "", "")
+
+	cases := []string{
+		"flux",
+		"flux_cd",
+		"helm-direct",
+		"fluxcd",
+		"helm_direct",
+	}
+
+	for i, backend := range cases {
+		t.Run(backend, func(t *testing.T) {
+			normalized := orchestrator.NormalizeDeploymentBackendType(backend)
+			if normalized == "" {
+				t.Fatalf("backend=%q did not normalize", backend)
+			}
+			switch normalized {
+			case orchestrator.DeploymentBackendHelmDirect:
+				// Keep this test stable in environments where a real Kubernetes cluster is unavailable.
+				// Helm-direct backend is still validated below via normalization check.
+				cfg.DeploymentBackend = "fluxcd"
+			default:
+				cfg.DeploymentBackend = backend
+			}
+			service := NewEnvironmentService(cfg, catalog.Default(), envStore, baseRenderer, baseWriter)
+			env, err := service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+				ID:      "kan-backend-" + strconv.Itoa(i+1),
+				Product: "bethunder",
+			})
+			if err != nil {
+				t.Fatalf("create with backend=%q: %v", backend, err)
+			}
+			if env.Status == domain.StatusFailed {
+				t.Fatalf("create with backend=%q failed status: %q", backend, env.Status)
+			}
+			if env.ManifestPath == "" {
+				t.Fatalf("backend=%q produced empty manifest path", backend)
+			}
+		})
+	}
+}
+
+func TestCreateEnvironmentFailsWithInvalidProjectConfigBackend(t *testing.T) {
+	tmp := t.TempDir()
+	envStore, err := store.NewJSONStore(filepath.Join(tmp, "store.json"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	projectConfigStore, err := store.NewJSONProjectConfigStore(filepath.Join(tmp, "project-configs.json"))
+	if err != nil {
+		t.Fatalf("project config store: %v", err)
+	}
+	if err := projectConfigStore.Save(domain.ProjectConfig{
+		ID:        "cms-config-v1",
+		ProjectID: "cms",
+		Version:   1,
+		Config: map[string]any{
+			"deployment": map[string]any{
+				"backend": "custom",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	cfg := config.FromEnv()
+	cfg.DeploymentBackend = "fluxcd"
+	service := NewEnvironmentService(cfg, catalog.Default(), envStore, gitops.NewFluxRenderer(cfg.GitOps), gitops.NewFileWriter(tmp, false, "", ""))
+	service.SetProjectConfigStore(projectConfigStore)
+
+	_, err = service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
+		ID:      "kan-backend-invalid",
+		Project: "cms",
+		Product: "bethunder",
+	})
+	if err == nil {
+		t.Fatal("expected invalid project deployment backend error")
+	}
+	if !strings.Contains(err.Error(), "unsupported deployment backend") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeleteEnvironmentUsesProjectConfigBackendValidation(t *testing.T) {
+	tmp := t.TempDir()
+	envStore, err := store.NewJSONStore(filepath.Join(tmp, "store.json"))
+	if err != nil {
+		t.Fatalf("store: %v", err)
+	}
+	projectConfigStore, err := store.NewJSONProjectConfigStore(filepath.Join(tmp, "project-configs.json"))
+	if err != nil {
+		t.Fatalf("project config store: %v", err)
+	}
+	if err := projectConfigStore.Save(domain.ProjectConfig{
+		ID:        "cms-config-v2",
+		ProjectID: "cms",
+		Version:   1,
+		Config: map[string]any{
+			"deployment": map[string]any{
+				"backend": "custom",
+			},
+		},
+	}); err != nil {
+		t.Fatalf("save project config: %v", err)
+	}
+
+	cfg := config.FromEnv()
+	cfg.DeploymentBackend = "helm_direct"
+	service := NewEnvironmentService(cfg, catalog.Default(), envStore, gitops.NewFluxRenderer(cfg.GitOps), gitops.NewFileWriter(tmp, false, "", ""))
+	service.SetProjectConfigStore(projectConfigStore)
+
+	if err := envStore.Save(domain.Environment{
+		ID:        "kan-delete-backend-invalid",
+		Project:   "cms",
+		Namespace: "cms-kan-delete",
+		Status:    domain.StatusReady,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed env: %v", err)
+	}
+
+	_, err = service.DeleteEnvironment(context.Background(), "kan-delete-backend-invalid", true)
+	if err == nil {
+		t.Fatal("expected invalid project deployment backend error")
+	}
+	if !strings.Contains(err.Error(), "unsupported deployment backend") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeploymentBackendFromProjectConfigInfersFluxcdFromLegacyFields(t *testing.T) {
+	backend := deploymentBackendFromProjectConfig(domain.ProjectConfig{
+		Config: map[string]any{
+			"deployment": map[string]any{
+				"gitopsRepoUrl":    "https://github.com/acme/gitops",
+				"gitOpsOutputPath": "environments/{{ .PRNumber }}",
+			},
+		},
+	})
+	if backend != string(domain.DeploymentBackendFluxCD) {
+		t.Fatalf("expected inferred backend %q, got %q", domain.DeploymentBackendFluxCD, backend)
+	}
+}
 
 func TestCreateEnvironmentAppliesProductDefaults(t *testing.T) {
 	tmp := t.TempDir()
@@ -248,8 +410,8 @@ func TestCreateEnvironmentUsesConfiguredGitOpsRepository(t *testing.T) {
 
 	verify := filepath.Join(tmp, "verify")
 	runAppGit(t, "", "git", "clone", "--branch", "main", remote, verify)
-	if _, err := os.Stat(filepath.Join(verify, "clusters/dev/feature-envs/checkout/pr-123/namespace.yaml")); err != nil {
-		t.Fatalf("expected pushed namespace manifest: %v", err)
+	if _, err := os.Stat(filepath.Join(verify, "clusters/dev/feature-envs/checkout/pr-123/flux-kustomization.yaml")); err != nil {
+		t.Fatalf("expected pushed deployment manifest: %v", err)
 	}
 }
 

@@ -89,8 +89,8 @@ func TestSubmitSCMEventOpenedQueuesCreateJob(t *testing.T) {
 	if env.Namespace != "envpilot-pr-2301" {
 		t.Fatalf("namespace = %q", env.Namespace)
 	}
-	if env.NamespaceManifestPath == "" || env.ManifestPath == "" {
-		t.Fatalf("expected namespace and flux manifests, got namespace=%q flux=%q", env.NamespaceManifestPath, env.ManifestPath)
+	if env.ManifestPath == "" && env.NamespaceManifestPath == "" {
+		t.Fatalf("expected deployment manifest path to be written, got namespace=%q flux=%q", env.NamespaceManifestPath, env.ManifestPath)
 	}
 	if env.Domain != "pr-2301.repo.preview.feature.int" {
 		t.Fatalf("domain = %q", env.Domain)
@@ -769,6 +769,7 @@ func newTestManagerWithProjectResolver(t *testing.T, projects []domain.Project) 
 	t.Helper()
 	tmp := t.TempDir()
 	cfg := config.FromEnv()
+	cfg.DeploymentBackend = "fluxcd"
 	cfg.DataDir = tmp
 	cfg.GitOpsDir = tmp
 	cfg.DefaultTTL = time.Hour

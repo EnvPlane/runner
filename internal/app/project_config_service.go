@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -54,7 +55,10 @@ func (s *ProjectConfigService) SaveFromBootstrapSession(project domain.Project, 
 		return domain.ProjectConfig{}, err
 	}
 
-	configData, sensitiveData := buildProjectConfigData(project, session)
+	configData, sensitiveData, err := buildProjectConfigData(project, session)
+	if err != nil {
+		return domain.ProjectConfig{}, err
+	}
 	createdAt := s.now()
 	config := domain.ProjectConfig{
 		ID:        fmt.Sprintf("%s-config-v%d", project.ID, nextVersion),
@@ -71,7 +75,7 @@ func (s *ProjectConfigService) SaveFromBootstrapSession(project domain.Project, 
 	return publicProjectConfig(config), nil
 }
 
-func buildProjectConfigData(project domain.Project, session domain.BootstrapSession) (map[string]any, map[string]any) {
+func buildProjectConfigData(project domain.Project, session domain.BootstrapSession) (map[string]any, map[string]any, error) {
 	sessionData := cloneMap(session.Data)
 	sensitive := map[string]any{}
 
@@ -105,13 +109,290 @@ func buildProjectConfigData(project domain.Project, session domain.BootstrapSess
 		}
 	}
 
+	deploymentConfig, err := buildProjectDeploymentConfig(project, sessionData)
+	if err != nil {
+		return nil, nil, err
+	}
+
 	config := map[string]any{
 		"schemaVersion":        "v1",
 		"project":              projectConfigProjectSummary(project),
 		"bootstrapSessionId":   session.ID,
 		"bootstrapSessionData": sessionData,
+		"deployment":           deploymentConfigToMap(deploymentConfig),
 	}
-	return config, sensitive
+	return config, sensitive, nil
+}
+
+func buildProjectDeploymentConfig(project domain.Project, sessionData map[string]any) (domain.ProjectDeploymentConfig, error) {
+	rawDeployment, _ := toMap(sessionData["deployment"])
+	if rawDeployment == nil {
+		rawDeployment = map[string]any{}
+	}
+	backend := domain.InferDeploymentBackend(rawDeployment["backend"], rawDeployment, sessionData)
+
+	config := domain.ProjectDeploymentConfig{
+		Backend: backend,
+	}
+
+	switch backend {
+	case domain.DeploymentBackendHelmDirect:
+		helmDirect, err := normalizeHelmDirectConfig(rawDeployment["helmDirect"], sessionData)
+		if err != nil {
+			return domain.ProjectDeploymentConfig{}, err
+		}
+		config.HelmDirect = helmDirect
+	case domain.DeploymentBackendFluxCD:
+		fluxCD, err := normalizeFluxCDConfig(rawDeployment["fluxcd"], sessionData, project)
+		if err != nil {
+			return domain.ProjectDeploymentConfig{}, err
+		}
+		config.FluxCD = fluxCD
+	}
+
+	if err := validateProjectDeploymentConfig(config); err != nil {
+		return domain.ProjectDeploymentConfig{}, err
+	}
+	return config, nil
+}
+
+func validateProjectDeploymentConfig(config domain.ProjectDeploymentConfig) error {
+	switch config.Backend {
+	case domain.DeploymentBackendHelmDirect:
+		return nil
+	case domain.DeploymentBackendFluxCD:
+		if config.FluxCD == nil {
+			return ValidationError{Message: "deployment.fluxcd is required for fluxcd backend"}
+		}
+		if strings.TrimSpace(config.FluxCD.GitopsRepo) == "" {
+			return ValidationError{Message: "deployment.fluxcd.gitopsRepo is required for fluxcd backend"}
+		}
+		if strings.TrimSpace(config.FluxCD.GitopsPath) == "" {
+			return ValidationError{Message: "deployment.fluxcd.gitopsPath is required for fluxcd backend"}
+		}
+		if strings.TrimSpace(config.FluxCD.FluxNamespace) == "" {
+			return ValidationError{Message: "deployment.fluxcd.fluxNamespace is required for fluxcd backend"}
+		}
+		if strings.TrimSpace(config.FluxCD.KustomizationName) == "" {
+			return ValidationError{Message: "deployment.fluxcd.kustomizationName is required for fluxcd backend"}
+		}
+		if strings.TrimSpace(config.FluxCD.CommitMode) == "" {
+			return ValidationError{Message: "deployment.fluxcd.commitMode is required for fluxcd backend"}
+		}
+		return nil
+	default:
+		return ValidationError{Message: "unsupported deployment.backend"}
+	}
+}
+
+func normalizeHelmDirectConfig(raw any, sessionData map[string]any) (*domain.ProjectHelmDirectConfig, error) {
+	config := &domain.ProjectHelmDirectConfig{
+		NamespaceMode:          "dedicated",
+		NamespacePattern:       "envpilot-pr-{{ .PRNumber }}",
+		ReleaseNamePattern:     "{{ .project.id }}-{{ .environment.name }}",
+		ChartRef:               "deploy/helm/envpilot",
+		Timeout:                300,
+		Wait:                   true,
+		CreateNamespace:        true,
+		ValuesOverrideStrategy: "merge",
+		ImageTagValuePath:      "imageTag",
+	}
+
+	item, ok := toMap(raw)
+	if !ok {
+		item = map[string]any{}
+	}
+	if value, ok := item["namespaceMode"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.namespaceMode is required for helm_direct backend"}
+		}
+		config.NamespaceMode = valueString
+	}
+	if value, ok := item["releaseNamePattern"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.releaseNamePattern is required for helm_direct backend"}
+		}
+		config.ReleaseNamePattern = valueString
+	}
+	if value, ok := item["namespacePattern"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.namespacePattern is required for helm_direct backend"}
+		}
+		config.NamespacePattern = valueString
+	}
+	if value, ok := item["chartRef"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.chartRef is required for helm_direct backend"}
+		}
+		config.ChartRef = valueString
+	}
+	if value, ok := item["valuesOverrideStrategy"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.valuesOverrideStrategy is required for helm_direct backend"}
+		}
+		config.ValuesOverrideStrategy = valueString
+	}
+	if value, ok := item["imageTagValuePath"]; ok {
+		valueString := strings.TrimSpace(asStringValue(value))
+		if valueString == "" {
+			return nil, ValidationError{Message: "deployment.helmDirect.imageTagValuePath is required for helm_direct backend"}
+		}
+		config.ImageTagValuePath = valueString
+	}
+	if value, ok := item["timeout"]; ok {
+		if timeout, ok := asIntValue(value); ok && timeout > 0 {
+			config.Timeout = timeout
+		} else {
+			return nil, ValidationError{Message: "deployment.helmDirect.timeout must be positive"}
+		}
+	}
+	if value, ok := item["wait"]; ok {
+		config.Wait = asBoolValue(value)
+	}
+	if value, ok := item["createNamespace"]; ok {
+		config.CreateNamespace = asBoolValue(value)
+	}
+	if value := asStringValue(sessionData["helmReleaseNamespaceMode"]); strings.TrimSpace(value) != "" && strings.TrimSpace(config.NamespaceMode) == "" {
+		config.NamespaceMode = strings.TrimSpace(value)
+	}
+	if strings.TrimSpace(config.NamespaceMode) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.namespaceMode is required for helm_direct backend"}
+	}
+	if strings.TrimSpace(config.ReleaseNamePattern) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.releaseNamePattern is required for helm_direct backend"}
+	}
+	if strings.TrimSpace(config.NamespacePattern) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.namespacePattern is required for helm_direct backend"}
+	}
+	if strings.TrimSpace(config.ChartRef) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.chartRef is required for helm_direct backend"}
+	}
+	if strings.TrimSpace(config.ValuesOverrideStrategy) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.valuesOverrideStrategy is required for helm_direct backend"}
+	}
+	if strings.TrimSpace(config.ImageTagValuePath) == "" {
+		return nil, ValidationError{Message: "deployment.helmDirect.imageTagValuePath is required for helm_direct backend"}
+	}
+	if config.Timeout <= 0 {
+		return nil, ValidationError{Message: "deployment.helmDirect.timeout must be positive"}
+	}
+	return config, nil
+}
+
+func normalizeFluxCDConfig(raw any, sessionData map[string]any, project domain.Project) (*domain.ProjectFluxCDConfig, error) {
+	item, ok := toMap(raw)
+	if !ok {
+		item = map[string]any{}
+	}
+	gitopsRepo := firstNonEmptyString(
+		asStringValue(item["gitopsRepo"]),
+		asStringValue(sessionData["gitopsRepo"]),
+		asStringValue(sessionData["gitOpsRepo"]),
+		asStringValue(sessionData["gitopsRepoUrl"]),
+		asStringValue(sessionData["gitOpsRepoUrl"]),
+		project.GitOpsRepo.URL,
+		project.GitOpsRepositoryID,
+	)
+	gitopsPath := firstNonEmptyString(asStringValue(item["gitopsPath"]), asStringValue(sessionData["gitOpsOutputPath"]), asStringValue(sessionData["gitopsPath"]))
+	fluxNamespace := firstNonEmptyString(asStringValue(item["fluxNamespace"]), asStringValue(sessionData["fluxNamespace"]))
+	kustomizationName := firstNonEmptyString(
+		asStringValue(item["kustomizationName"]),
+		asStringValue(sessionData["kustomizationName"]),
+		asStringValue(sessionData["fluxKustomizationRef"]),
+	)
+	commitMode := firstNonEmptyString(asStringValue(item["commitMode"]), asStringValue(sessionData["gitOpsCommitMode"]))
+
+	return &domain.ProjectFluxCDConfig{
+		GitopsRepo:        gitopsRepo,
+		GitopsPath:        gitopsPath,
+		FluxNamespace:     fluxNamespace,
+		KustomizationName: kustomizationName,
+		CommitMode:        commitMode,
+	}, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
+}
+
+func asIntValue(value any) (int, bool) {
+	switch typed := value.(type) {
+	case int:
+		return typed, true
+	case int8:
+		return int(typed), true
+	case int16:
+		return int(typed), true
+	case int32:
+		return int(typed), true
+	case int64:
+		return int(typed), true
+	case uint:
+		return int(typed), true
+	case uint8:
+		return int(typed), true
+	case uint16:
+		return int(typed), true
+	case uint32:
+		return int(typed), true
+	case uint64:
+		return int(typed), true
+	case float64:
+		return int(typed), true
+	case float32:
+		return int(typed), true
+	case string:
+		timeoutValue := strings.TrimSpace(typed)
+		if timeoutValue == "" {
+			return 0, false
+		}
+		i, err := strconv.Atoi(timeoutValue)
+		if err != nil {
+			return 0, false
+		}
+		return i, true
+	default:
+		return 0, false
+	}
+}
+
+func deploymentConfigToMap(config domain.ProjectDeploymentConfig) map[string]any {
+	result := map[string]any{
+		"backend": string(config.Backend),
+	}
+	if config.HelmDirect != nil {
+		result["helmDirect"] = map[string]any{
+			"namespaceMode":          config.HelmDirect.NamespaceMode,
+			"namespacePattern":       config.HelmDirect.NamespacePattern,
+			"releaseNamePattern":     config.HelmDirect.ReleaseNamePattern,
+			"chartRef":               config.HelmDirect.ChartRef,
+			"timeout":                config.HelmDirect.Timeout,
+			"wait":                   config.HelmDirect.Wait,
+			"createNamespace":        config.HelmDirect.CreateNamespace,
+			"valuesOverrideStrategy": config.HelmDirect.ValuesOverrideStrategy,
+			"imageTagValuePath":      config.HelmDirect.ImageTagValuePath,
+		}
+	}
+	if config.FluxCD != nil {
+		result["fluxcd"] = map[string]any{
+			"gitopsRepo":        config.FluxCD.GitopsRepo,
+			"gitopsPath":        config.FluxCD.GitopsPath,
+			"fluxNamespace":     config.FluxCD.FluxNamespace,
+			"kustomizationName": config.FluxCD.KustomizationName,
+			"commitMode":        config.FluxCD.CommitMode,
+		}
+	}
+	return result
 }
 
 func projectConfigProjectSummary(project domain.Project) map[string]any {

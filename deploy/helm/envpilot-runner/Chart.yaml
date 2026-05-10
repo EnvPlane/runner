@@ -1,0 +1,15 @@
+apiVersion: v2
+name: envpilot-runner-chart
+description: EnvPilot runner that compiles and applies feature environments for a single project.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - envpilot
+  - runner
+  - feature-environments
+home: https://envpilot.local
+sources:
+  - https://envpilot.local
+maintainers:
+  - name: EnvPilot Platform Team
