@@ -25,6 +25,101 @@ type fakeCapabilitySource struct {
 	err          error
 }
 
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func TestNextRunnerCommandClassifiesEndpointAndAuthenticationFailures(t *testing.T) {
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
+	tests := []struct {
+		name      string
+		status    int
+		assertion func(error) bool
+	}{
+		{name: "missing endpoint", status: http.StatusNotFound, assertion: isRunnerCommandAPIIncompatible},
+		{name: "authentication failure", status: http.StatusUnauthorized, assertion: isRunnerCommandAuthenticationError},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+				if got := request.Header.Get(runnerCommandAPIVersionHeader); got != runnerCommandAPIVersion {
+					t.Fatalf("command API version header = %q", got)
+				}
+				return &http.Response{StatusCode: tc.status, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("test failure")), Request: request}, nil
+			})}
+			_, _, err := nextRunnerCommand(context.Background(), cfg, client)
+			if err == nil || !tc.assertion(err) {
+				t.Fatalf("nextRunnerCommand error = %v", err)
+			}
+		})
+	}
+}
+
+func TestNextRunnerCommandRequiresCompatibilityResponseHeader(t *testing.T) {
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+	})}
+	_, _, err := nextRunnerCommand(context.Background(), cfg, client)
+	if err == nil || !isRunnerCommandAPIIncompatible(err) {
+		t.Fatalf("nextRunnerCommand error = %v, want compatibility error", err)
+	}
+}
+
+func TestNextRunnerCommandClassifiesTransportFailure(t *testing.T) {
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return nil, errors.New("network unavailable")
+	})}
+	_, _, err := nextRunnerCommand(context.Background(), cfg, client)
+	if err == nil || !isRunnerCommandTransportError(err) {
+		t.Fatalf("nextRunnerCommand error = %v, want transport error", err)
+	}
+}
+
+func TestPollRunnerCommandsOnceDegradesAndStopsForMissingEndpoint(t *testing.T) {
+	polls := 0
+	heartbeats := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/api/v1/runners/commands/next":
+			polls++
+			return &http.Response{StatusCode: http.StatusNotFound, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("missing")), Request: request}, nil
+		case "/api/v1/runners/heartbeat":
+			heartbeats++
+			var heartbeat domain.RunnerHeartbeatRequest
+			if err := json.NewDecoder(request.Body).Decode(&heartbeat); err != nil {
+				t.Fatalf("decode degraded heartbeat: %v", err)
+			}
+			if heartbeat.Status != string(domain.RunnerHeartbeatStatusDegraded) || heartbeat.Error == "" {
+				t.Fatalf("degraded heartbeat = %#v", heartbeat)
+			}
+			return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL.Path)
+			return nil, nil
+		}
+	})}
+
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	state := newRunnerRuntimeState()
+	health := &runnerHealth{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if keepPolling := pollRunnerCommandsOnce(context.Background(), cfg, client, state, health, logger); keepPolling {
+		t.Fatal("missing command endpoint must disable polling")
+	}
+	status, reason := state.heartbeat()
+	if status != string(domain.RunnerHeartbeatStatusDegraded) || reason == "" {
+		t.Fatalf("runtime state = (%q, %q)", status, reason)
+	}
+	if polls != 1 || heartbeats != 1 || !health.degraded.Load() {
+		t.Fatalf("polls=%d heartbeats=%d degraded=%v", polls, heartbeats, health.degraded.Load())
+	}
+}
+
 func TestClassifyHelmChartPreflightError(t *testing.T) {
 	tests := []struct {
 		name string

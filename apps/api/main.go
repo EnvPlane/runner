@@ -39,6 +39,11 @@ import (
 	"envpilot/internal/ttl"
 )
 
+const (
+	runnerCommandAPIVersion       = "1"
+	runnerCommandAPIVersionHeader = "X-EnvPilot-Runner-Command-API-Version"
+)
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if len(os.Args) > 1 {
@@ -514,6 +519,7 @@ func runRunner(logger *slog.Logger) {
 	defer stop()
 
 	health := &runnerHealth{}
+	runtimeState := newRunnerRuntimeState()
 	go serveRunnerHealth(ctx, cfg.HealthAddr, health, logger)
 
 	client := &http.Client{Timeout: cfg.ReportTimeout}
@@ -537,21 +543,31 @@ func runRunner(logger *slog.Logger) {
 	}
 	health.set(true)
 	logger.Info("envpilot runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
-	go runRunnerCommands(ctx, cfg, client, logger)
-	runRunnerHeartbeat(ctx, cfg, client, health, logger)
+	go runRunnerCommands(ctx, cfg, client, runtimeState, health, logger)
+	runRunnerHeartbeat(ctx, cfg, client, runtimeState, health, logger)
 }
 
 type runnerHealth struct {
-	online atomic.Bool
+	online   atomic.Bool
+	degraded atomic.Bool
 }
 
 func (h *runnerHealth) set(online bool) {
 	h.online.Store(online)
 }
 
+func (h *runnerHealth) setDegraded() {
+	h.degraded.Store(true)
+	h.online.Store(false)
+}
+
 func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, logger *slog.Logger) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		if health.degraded.Load() {
+			writeRunnerJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "degraded"})
+			return
+		}
 		if !health.online.Load() {
 			writeRunnerJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "starting"})
 			return
@@ -568,6 +584,30 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		logger.Error("runner health server stopped", "error", err)
 	}
+}
+
+// runnerRuntimeState is shared by the heartbeat and command-poll loops. In
+// particular, a runner must not overwrite a detected command API incompatibility
+// with a later "online" heartbeat.
+type runnerRuntimeState struct {
+	status atomic.Value
+	error  atomic.Value
+}
+
+func newRunnerRuntimeState() *runnerRuntimeState {
+	state := &runnerRuntimeState{}
+	state.status.Store(string(domain.RunnerHeartbeatStatusOnline))
+	state.error.Store("")
+	return state
+}
+
+func (s *runnerRuntimeState) heartbeat() (string, string) {
+	return s.status.Load().(string), s.error.Load().(string)
+}
+
+func (s *runnerRuntimeState) setDegraded(reason string) {
+	s.status.Store(string(domain.RunnerHeartbeatStatusDegraded))
+	s.error.Store(strings.TrimSpace(reason))
 }
 
 func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) (runnerConfig, bool, error) {
@@ -620,7 +660,7 @@ func fetchRunnerProjectConfig(ctx context.Context, cfg runnerConfig, client *htt
 	return nil
 }
 
-func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, health *runnerHealth, logger *slog.Logger) {
+func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -628,17 +668,22 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusOnline), ""); err != nil {
+			status, statusError := state.heartbeat()
+			if err := reportRunnerHeartbeat(ctx, cfg, client, status, statusError); err != nil {
 				health.set(false)
 				logger.Error("runner heartbeat failed", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID, "error", err)
 				continue
 			}
-			health.set(true)
+			if status == string(domain.RunnerHeartbeatStatusDegraded) {
+				health.setDegraded()
+			} else {
+				health.set(true)
+			}
 		}
 	}
 }
 
-func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) {
+func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 	for {
@@ -646,24 +691,91 @@ func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Clien
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			command, found, err := nextRunnerCommand(ctx, cfg, client)
-			if err != nil {
-				logger.Warn("runner command poll failed", "error", err)
-				continue
-			}
-			if !found {
-				continue
-			}
-			result := executeRunnerCommand(ctx, command)
-			result.ProjectID = cfg.ProjectID
-			result.ClusterID = cfg.ClusterID
-			result.RunnerID = cfg.RunnerID
-			result.RunnerAuthToken = cfg.RunnerAuthToken
-			if err := runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/commands/"+url.PathEscape(command.ID)+"/result", cfg.RunnerAuthToken, result, nil); err != nil {
-				logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
+			if !pollRunnerCommandsOnce(ctx, cfg, client, state, health, logger) {
+				return
 			}
 		}
 	}
+}
+
+// pollRunnerCommandsOnce returns false only for a deterministic API
+// incompatibility. Transient transport/auth/response failures are kept visible
+// in logs and retried on the next interval.
+func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) bool {
+	command, found, err := nextRunnerCommand(ctx, cfg, client)
+	if err != nil {
+		if isRunnerCommandAPIIncompatible(err) {
+			reason := "Runner command API is unavailable or incompatible: " + err.Error()
+			state.setDegraded(reason)
+			health.setDegraded()
+			if heartbeatErr := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusDegraded), reason); heartbeatErr != nil {
+				logger.Error("runner command API incompatible and degraded heartbeat failed", "error", heartbeatErr)
+			}
+			logger.Error("runner command API incompatible; command polling disabled", "error", err)
+			return false
+		}
+		if isRunnerCommandAuthenticationError(err) {
+			logger.Error("runner command poll authentication failed", "error", err)
+		} else if isRunnerCommandTransportError(err) {
+			logger.Warn("runner command poll transport failed", "error", err)
+		} else {
+			logger.Error("runner command poll response handling failed", "error", err)
+		}
+		return true
+	}
+	if !found {
+		return true
+	}
+	result := executeRunnerCommand(ctx, command)
+	result.ProjectID = cfg.ProjectID
+	result.ClusterID = cfg.ClusterID
+	result.RunnerID = cfg.RunnerID
+	result.RunnerAuthToken = cfg.RunnerAuthToken
+	if err := reportRunnerCommandResult(ctx, cfg, client, command.ID, result); err != nil {
+		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
+	}
+	return true
+}
+
+type runnerCommandEndpointMissingError struct{ detail string }
+
+func (e runnerCommandEndpointMissingError) Error() string {
+	return "command polling endpoint is missing: " + e.detail
+}
+
+type runnerCommandCompatibilityError struct{ detail string }
+
+func (e runnerCommandCompatibilityError) Error() string {
+	return "command polling API compatibility failure: " + e.detail
+}
+
+type runnerCommandAuthenticationError struct{ detail string }
+
+func (e runnerCommandAuthenticationError) Error() string {
+	return "command polling authentication failure: " + e.detail
+}
+
+type runnerCommandTransportError struct{ cause error }
+
+func (e runnerCommandTransportError) Error() string {
+	return "command polling transport failure: " + e.cause.Error()
+}
+func (e runnerCommandTransportError) Unwrap() error { return e.cause }
+
+func isRunnerCommandAPIIncompatible(err error) bool {
+	var missing runnerCommandEndpointMissingError
+	var incompatible runnerCommandCompatibilityError
+	return errors.As(err, &missing) || errors.As(err, &incompatible)
+}
+
+func isRunnerCommandAuthenticationError(err error) bool {
+	var auth runnerCommandAuthenticationError
+	return errors.As(err, &auth)
+}
+
+func isRunnerCommandTransportError(err error) bool {
+	var transport runnerCommandTransportError
+	return errors.As(err, &transport)
 }
 
 func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Client) (domain.RunnerCommand, bool, error) {
@@ -673,23 +785,47 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 		return domain.RunnerCommand{}, false, err
 	}
 	req.Header.Set("Authorization", "Bearer "+cfg.RunnerAuthToken)
+	req.Header.Set(runnerCommandAPIVersionHeader, runnerCommandAPIVersion)
 	resp, err := client.Do(req)
 	if err != nil {
-		return domain.RunnerCommand{}, false, err
+		return domain.RunnerCommand{}, false, runnerCommandTransportError{cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
+		if err := validateRunnerCommandAPIResponse(resp); err != nil {
+			return domain.RunnerCommand{}, false, err
+		}
 		return domain.RunnerCommand{}, false, nil
 	}
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return domain.RunnerCommand{}, false, fmt.Errorf("runner command poll status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		detail := fmt.Sprintf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		if resp.StatusCode == http.StatusNotFound {
+			return domain.RunnerCommand{}, false, runnerCommandEndpointMissingError{detail: detail}
+		}
+		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			return domain.RunnerCommand{}, false, runnerCommandAuthenticationError{detail: detail}
+		}
+		if resp.StatusCode == http.StatusUpgradeRequired {
+			return domain.RunnerCommand{}, false, runnerCommandCompatibilityError{detail: detail}
+		}
+		return domain.RunnerCommand{}, false, fmt.Errorf("runner command poll response status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	if err := validateRunnerCommandAPIResponse(resp); err != nil {
+		return domain.RunnerCommand{}, false, err
 	}
 	var command domain.RunnerCommand
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&command); err != nil {
 		return domain.RunnerCommand{}, false, err
 	}
 	return command, true, nil
+}
+
+func validateRunnerCommandAPIResponse(resp *http.Response) error {
+	if version := strings.TrimSpace(resp.Header.Get(runnerCommandAPIVersionHeader)); version != runnerCommandAPIVersion {
+		return runnerCommandCompatibilityError{detail: fmt.Sprintf("expected response header %s=%q, got %q", runnerCommandAPIVersionHeader, runnerCommandAPIVersion, version)}
+	}
+	return nil
 }
 
 func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) domain.RunnerCommandResult {
@@ -779,7 +915,23 @@ func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.C
 	return runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/heartbeat", "", payload, nil)
 }
 
+func reportRunnerCommandResult(ctx context.Context, cfg runnerConfig, client *http.Client, commandID string, result domain.RunnerCommandResult) error {
+	return runnerPostJSONWithHeaders(
+		ctx,
+		client,
+		cfg.ControlPlaneURL+"/api/v1/runners/commands/"+url.PathEscape(commandID)+"/result",
+		cfg.RunnerAuthToken,
+		result,
+		nil,
+		http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}},
+	)
+}
+
 func runnerPostJSON(ctx context.Context, client *http.Client, endpoint string, bearerToken string, payload any, target any) error {
+	return runnerPostJSONWithHeaders(ctx, client, endpoint, bearerToken, payload, target, nil)
+}
+
+func runnerPostJSONWithHeaders(ctx context.Context, client *http.Client, endpoint string, bearerToken string, payload any, target any, headers http.Header) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
@@ -792,6 +944,11 @@ func runnerPostJSON(ctx context.Context, client *http.Client, endpoint string, b
 	req.Header.Set("Accept", "application/json")
 	if token := strings.TrimSpace(bearerToken); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	for key, values := range headers {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {

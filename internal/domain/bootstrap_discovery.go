@@ -292,6 +292,7 @@ const (
 	RunnerHeartbeatStatusWaiting   RunnerHeartbeatStatus = "waiting"
 	RunnerHeartbeatStatusConnected RunnerHeartbeatStatus = "connected"
 	RunnerHeartbeatStatusOnline    RunnerHeartbeatStatus = "online"
+	RunnerHeartbeatStatusDegraded  RunnerHeartbeatStatus = "degraded"
 	RunnerHeartbeatStatusFailed    RunnerHeartbeatStatus = "failed"
 )
 
@@ -301,7 +302,7 @@ func ParseRunnerHeartbeatStatus(raw string) (RunnerHeartbeatStatus, bool) {
 		return RunnerHeartbeatStatusConnected, true
 	}
 	switch RunnerHeartbeatStatus(normalized) {
-	case RunnerHeartbeatStatusWaiting, RunnerHeartbeatStatusConnected, RunnerHeartbeatStatusOnline, RunnerHeartbeatStatusFailed:
+	case RunnerHeartbeatStatusWaiting, RunnerHeartbeatStatusConnected, RunnerHeartbeatStatusOnline, RunnerHeartbeatStatusDegraded, RunnerHeartbeatStatusFailed:
 		return RunnerHeartbeatStatus(normalized), true
 	default:
 		return "", false

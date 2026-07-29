@@ -4370,7 +4370,7 @@ func (s *Server) runnerHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	status, ok := domain.ParseRunnerHeartbeatStatus(req.Status)
 	if !ok {
-		writeError(w, http.StatusBadRequest, fmt.Errorf("status must be one of: waiting, connected, online, failed"))
+		writeError(w, http.StatusBadRequest, fmt.Errorf("status must be one of: waiting, connected, online, degraded, failed"))
 		return
 	}
 	now := time.Now().UTC()

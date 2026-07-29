@@ -7324,7 +7324,7 @@ func TestRunnerHeartbeatRejectsUnknownStatus(t *testing.T) {
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	registerResp := registerRunnerForTest(t, application, deployResp)
 
-	body := runnerHeartbeatRequestBody(projectID, "dev-us", projectID+"-runner", "envpilot-runner", "helm", registerResp.RunnerAuthToken, "degraded")
+	body := runnerHeartbeatRequestBody(projectID, "dev-us", projectID+"-runner", "envpilot-runner", "helm", registerResp.RunnerAuthToken, "unsupported")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/runners/heartbeat", bytes.NewReader([]byte(body)))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -7332,7 +7332,7 @@ func TestRunnerHeartbeatRejectsUnknownStatus(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for unknown status, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	if !strings.Contains(rec.Body.String(), "status must be one of: waiting, connected, online, failed") {
+	if !strings.Contains(rec.Body.String(), "status must be one of: waiting, connected, online, degraded, failed") {
 		t.Fatalf("unexpected error body: %s", rec.Body.String())
 	}
 }
