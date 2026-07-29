@@ -19,6 +19,10 @@ rules:
   - apiGroups: [""]
     resources:
       - configmaps
+      # Helm's default storage driver writes release state to Secrets in the
+      # feature namespace. The runner must be able to manage those records
+      # alongside the workload objects it creates.
+      - secrets
       - events
       - services
       - resourcequotas

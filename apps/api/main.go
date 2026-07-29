@@ -28,6 +28,7 @@ import (
 	"envpilot/internal/gitops"
 	"envpilot/internal/jobs"
 	"envpilot/internal/notify"
+	"envpilot/internal/orchestrator"
 	"envpilot/internal/postgres"
 	"envpilot/internal/redisqueue"
 	scmcomment "envpilot/internal/scm/comment"
@@ -535,6 +536,7 @@ func runRunner(logger *slog.Logger) {
 	}
 	health.set(true)
 	logger.Info("envpilot runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
+	go runRunnerCommands(ctx, cfg, client, logger)
 	runRunnerHeartbeat(ctx, cfg, client, health, logger)
 }
 
@@ -633,6 +635,81 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 			health.set(true)
 		}
 	}
+}
+
+func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			command, found, err := nextRunnerCommand(ctx, cfg, client)
+			if err != nil {
+				logger.Warn("runner command poll failed", "error", err)
+				continue
+			}
+			if !found {
+				continue
+			}
+			result := executeRunnerCommand(ctx, command)
+			result.ProjectID = cfg.ProjectID
+			result.ClusterID = cfg.ClusterID
+			result.RunnerID = cfg.RunnerID
+			result.RunnerAuthToken = cfg.RunnerAuthToken
+			if err := runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/commands/"+url.PathEscape(command.ID)+"/result", cfg.RunnerAuthToken, result, nil); err != nil {
+				logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
+			}
+		}
+	}
+}
+
+func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Client) (domain.RunnerCommand, bool, error) {
+	endpoint := cfg.ControlPlaneURL + "/api/v1/runners/commands/next?projectId=" + url.QueryEscape(cfg.ProjectID) + "&clusterId=" + url.QueryEscape(cfg.ClusterID) + "&runnerId=" + url.QueryEscape(cfg.RunnerID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return domain.RunnerCommand{}, false, err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.RunnerAuthToken)
+	resp, err := client.Do(req)
+	if err != nil {
+		return domain.RunnerCommand{}, false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNoContent {
+		return domain.RunnerCommand{}, false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return domain.RunnerCommand{}, false, fmt.Errorf("runner command poll status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	var command domain.RunnerCommand
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&command); err != nil {
+		return domain.RunnerCommand{}, false, err
+	}
+	return command, true, nil
+}
+
+func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) domain.RunnerCommandResult {
+	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
+	backend := orchestrator.NewHelmDirectBackend(nil)
+	var err error
+	switch command.Operation {
+	case "create", "recreate":
+		err = backend.Apply(ctx, command.Environment, command.ProjectConfig)
+	case "delete":
+		err = backend.Delete(ctx, command.Environment, command.ProjectConfig)
+	default:
+		result.Error = "unsupported runner command operation"
+		return result
+	}
+	if err != nil {
+		result.Error = err.Error()
+		return result
+	}
+	result.Status = "succeeded"
+	return result
 }
 
 func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string) error {

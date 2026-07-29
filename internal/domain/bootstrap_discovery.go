@@ -259,6 +259,31 @@ type RunnerHeartbeatRequest struct {
 	ObservedAt      time.Time `json:"observedAt,omitempty"`
 }
 
+type RunnerCommand struct {
+	ID            string        `json:"id"`
+	ProjectID     string        `json:"projectId"`
+	ClusterID     string        `json:"clusterId"`
+	RunnerID      string        `json:"runnerId"`
+	Operation     string        `json:"operation"`
+	Environment   Environment   `json:"environment"`
+	ProjectConfig ProjectConfig `json:"projectConfig"`
+	Status        string        `json:"status"`
+	CreatedAt     time.Time     `json:"createdAt"`
+	ClaimedAt     *time.Time    `json:"claimedAt,omitempty"`
+}
+
+type RunnerCommandResult struct {
+	ProjectID       string `json:"projectId"`
+	ClusterID       string `json:"clusterId"`
+	RunnerID        string `json:"runnerId"`
+	RunnerAuthToken string `json:"runnerAuthToken"`
+	CommandID       string `json:"commandId"`
+	Status          string `json:"status"`
+	ReleaseName     string `json:"releaseName,omitempty"`
+	Namespace       string `json:"namespace,omitempty"`
+	Error           string `json:"error,omitempty"`
+}
+
 type RunnerHeartbeatStatus string
 
 const (

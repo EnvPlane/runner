@@ -37,6 +37,8 @@ func TestRunnerChartDefinesHelmDeployContract(t *testing.T) {
 		"ENVPILOT_RUNNER_REGISTRATION_TOKEN",
 		"ENVPILOT_RUNNER_AUTH_TOKEN",
 		"ENVPILOT_RUNNER_AUTH_TOKEN_FILE",
+		"name: HOME",
+		"name: runner-work",
 		"name: wait-control-plane",
 		"/health",
 	} {
@@ -177,8 +179,11 @@ func TestRunnerChartDefaultRBACIsLeastPrivilege(t *testing.T) {
 	if writerDoc == "" {
 		t.Fatalf("feature-env-writer Role not found")
 	}
-	if docHasAnyResource(writerDoc, "secrets") {
-		t.Fatalf("feature-env-writer must not manage secrets by default:\n%s", writerDoc)
+	// Helm's default storage driver persists release records in Secrets. This
+	// remains namespace-scoped in the feature-environment writer Role; it must
+	// never be moved into the discovery ClusterRole.
+	if !docHasAnyResource(writerDoc, "secrets") {
+		t.Fatalf("feature-env-writer must manage Helm release Secrets:\n%s", writerDoc)
 	}
 	if docHasAnyResource(writerDoc, "networkpolicies", "helmreleases", "kustomizations", "gitrepositories") {
 		t.Fatalf("feature-env-writer optional capabilities must be disabled by default:\n%s", writerDoc)
