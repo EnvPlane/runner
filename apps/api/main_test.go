@@ -128,7 +128,9 @@ func TestClassifyHelmChartPreflightError(t *testing.T) {
 	}{
 		{name: "missing repo", err: "Error: repo stable not found", code: "helm_repo_missing"},
 		{name: "missing chart", err: "Error: chart \"missing\" not found", code: "helm_chart_missing"},
+		{name: "missing version", err: "Error: chart version 1.2.3 not found", code: "helm_chart_version_missing"},
 		{name: "authentication", err: "Error: unauthorized: authentication required", code: "helm_chart_auth_failed"},
+		{name: "invalid reference", err: "invalid chart reference", code: "helm_chart_reference_invalid"},
 		{name: "other", err: "network timeout", code: "helm_chart_preflight_failed"},
 	}
 	for _, test := range tests {
@@ -141,7 +143,7 @@ func TestClassifyHelmChartPreflightError(t *testing.T) {
 	}
 }
 
-func TestValidateRunnerHelmChartUsesTargetRunnerHelm(t *testing.T) {
+func TestValidateRunnerHelmChartUsesTargetRunnerHelmForPrivateOCIChart(t *testing.T) {
 	var got []string
 	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://registry.example.com/charts/orders", func(_ context.Context, args ...string) ([]byte, error) {
 		got = args
@@ -152,6 +154,17 @@ func TestValidateRunnerHelmChartUsesTargetRunnerHelm(t *testing.T) {
 	}
 	if strings.Join(got, " ") != "show chart oci://registry.example.com/charts/orders" {
 		t.Fatalf("helm arguments = %q", got)
+	}
+}
+
+func TestValidateRunnerHelmChartRejectsLegacyLocalPathWithoutExecutingHelm(t *testing.T) {
+	called := false
+	err := validateRunnerHelmChartWithCommand(context.Background(), "deploy/helm/{{ .project.id }}", func(_ context.Context, _ ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid chart reference") || called {
+		t.Fatalf("legacy local chart ref must be rejected before helm execution, err=%v called=%v", err, called)
 	}
 }
 

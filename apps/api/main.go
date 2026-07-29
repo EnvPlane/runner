@@ -876,8 +876,8 @@ func validateRunnerHelmChart(ctx context.Context, chartRef string) error {
 
 func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef string, run func(context.Context, ...string) ([]byte, error)) error {
 	chartRef = strings.TrimSpace(chartRef)
-	if chartRef == "" {
-		return fmt.Errorf("chart reference is required")
+	if !validRunnerHelmChartRef(chartRef) {
+		return fmt.Errorf("invalid chart reference")
 	}
 	output, err := run(ctx, "show", "chart", chartRef)
 	if err == nil {
@@ -886,13 +886,29 @@ func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef string, ru
 	return fmt.Errorf("%s", strings.TrimSpace(string(output)))
 }
 
+func validRunnerHelmChartRef(chartRef string) bool {
+	chartRef = strings.TrimSpace(chartRef)
+	if chartRef == "" || strings.HasPrefix(chartRef, "deploy/helm/") || strings.HasPrefix(chartRef, "./") || strings.HasPrefix(chartRef, "../") {
+		return false
+	}
+	if strings.HasPrefix(chartRef, "oci://") || strings.HasPrefix(chartRef, "https://") || strings.HasPrefix(chartRef, "http://") {
+		return true
+	}
+	parts := strings.Split(chartRef, "/")
+	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
+}
+
 func classifyHelmChartPreflightError(err error) (string, string) {
 	message := strings.ToLower(err.Error())
 	switch {
+	case strings.Contains(message, "invalid chart reference"):
+		return "helm_chart_reference_invalid", "Helm chart reference must be OCI, HTTP(S), or a configured repo/chart reference."
 	case strings.Contains(message, "repo") && strings.Contains(message, "not found"):
 		return "helm_repo_missing", "Helm repository is not configured in the target runner."
 	case strings.Contains(message, "unauthorized"), strings.Contains(message, "authentication"), strings.Contains(message, "forbidden"), strings.Contains(message, "denied"), strings.Contains(message, "401"):
 		return "helm_chart_auth_failed", "Target runner could not authenticate to the Helm chart repository."
+	case strings.Contains(message, "version") && strings.Contains(message, "not found"):
+		return "helm_chart_version_missing", "Requested Helm chart version was not found in the configured repository."
 	case strings.Contains(message, "chart") && strings.Contains(message, "not found"), strings.Contains(message, "not found"):
 		return "helm_chart_missing", "Helm chart was not found in the configured repository."
 	default:
