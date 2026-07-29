@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -22,6 +23,41 @@ import (
 type fakeCapabilitySource struct {
 	capabilities agent.ClusterCapabilities
 	err          error
+}
+
+func TestClassifyHelmChartPreflightError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  string
+		code string
+	}{
+		{name: "missing repo", err: "Error: repo stable not found", code: "helm_repo_missing"},
+		{name: "missing chart", err: "Error: chart \"missing\" not found", code: "helm_chart_missing"},
+		{name: "authentication", err: "Error: unauthorized: authentication required", code: "helm_chart_auth_failed"},
+		{name: "other", err: "network timeout", code: "helm_chart_preflight_failed"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			code, message := classifyHelmChartPreflightError(errors.New(test.err))
+			if code != test.code || strings.TrimSpace(message) == "" {
+				t.Fatalf("classify(%q) = (%q, %q), want code %q and safe message", test.err, code, message, test.code)
+			}
+		})
+	}
+}
+
+func TestValidateRunnerHelmChartUsesTargetRunnerHelm(t *testing.T) {
+	var got []string
+	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://registry.example.com/charts/orders", func(_ context.Context, args ...string) ([]byte, error) {
+		got = args
+		return []byte("apiVersion: v2\nname: orders\n"), nil
+	})
+	if err != nil {
+		t.Fatalf("validate chart: %v", err)
+	}
+	if strings.Join(got, " ") != "show chart oci://registry.example.com/charts/orders" {
+		t.Fatalf("helm arguments = %q", got)
+	}
 }
 
 func (s fakeCapabilitySource) DiscoverCapabilities(context.Context) (agent.ClusterCapabilities, error) {

@@ -265,6 +265,7 @@ type RunnerCommand struct {
 	ClusterID     string        `json:"clusterId"`
 	RunnerID      string        `json:"runnerId"`
 	Operation     string        `json:"operation"`
+	ChartRef      string        `json:"chartRef,omitempty"`
 	Environment   Environment   `json:"environment"`
 	ProjectConfig ProjectConfig `json:"projectConfig"`
 	Status        string        `json:"status"`
@@ -282,6 +283,7 @@ type RunnerCommandResult struct {
 	ReleaseName     string `json:"releaseName,omitempty"`
 	Namespace       string `json:"namespace,omitempty"`
 	Error           string `json:"error,omitempty"`
+	ErrorCode       string `json:"errorCode,omitempty"`
 }
 
 type RunnerHeartbeatStatus string

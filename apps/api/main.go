@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -696,6 +697,15 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	backend := orchestrator.NewHelmDirectBackend(nil)
 	var err error
 	switch command.Operation {
+	case "validate_helm_chart":
+		result.Namespace = ""
+		result.ReleaseName = ""
+		if err := validateRunnerHelmChart(ctx, command.ChartRef); err != nil {
+			result.ErrorCode, result.Error = classifyHelmChartPreflightError(err)
+			return result
+		}
+		result.Status = "succeeded"
+		return result
 	case "create", "recreate":
 		err = backend.Apply(ctx, command.Environment, command.ProjectConfig)
 	case "delete":
@@ -710,6 +720,38 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	}
 	result.Status = "succeeded"
 	return result
+}
+
+func validateRunnerHelmChart(ctx context.Context, chartRef string) error {
+	return validateRunnerHelmChartWithCommand(ctx, chartRef, func(ctx context.Context, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, "helm", args...).CombinedOutput()
+	})
+}
+
+func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef string, run func(context.Context, ...string) ([]byte, error)) error {
+	chartRef = strings.TrimSpace(chartRef)
+	if chartRef == "" {
+		return fmt.Errorf("chart reference is required")
+	}
+	output, err := run(ctx, "show", "chart", chartRef)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+}
+
+func classifyHelmChartPreflightError(err error) (string, string) {
+	message := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(message, "repo") && strings.Contains(message, "not found"):
+		return "helm_repo_missing", "Helm repository is not configured in the target runner."
+	case strings.Contains(message, "unauthorized"), strings.Contains(message, "authentication"), strings.Contains(message, "forbidden"), strings.Contains(message, "denied"), strings.Contains(message, "401"):
+		return "helm_chart_auth_failed", "Target runner could not authenticate to the Helm chart repository."
+	case strings.Contains(message, "chart") && strings.Contains(message, "not found"), strings.Contains(message, "not found"):
+		return "helm_chart_missing", "Helm chart was not found in the configured repository."
+	default:
+		return "helm_chart_preflight_failed", "Target runner could not resolve the Helm chart."
+	}
 }
 
 func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string) error {
