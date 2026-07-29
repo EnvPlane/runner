@@ -707,8 +707,18 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 		result.Status = "succeeded"
 		return result
 	case "create", "recreate":
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, command.ProjectConfig)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
 		err = backend.Apply(ctx, command.Environment, command.ProjectConfig)
 	case "delete":
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, command.ProjectConfig)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
 		err = backend.Delete(ctx, command.Environment, command.ProjectConfig)
 	default:
 		result.Error = "unsupported runner command operation"

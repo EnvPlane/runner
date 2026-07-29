@@ -503,6 +503,18 @@ func (b *HelmDirectBackend) Apply(ctx context.Context, environment domain.Enviro
 	})
 }
 
+// DeploymentTarget resolves the exact release and namespace that Helm will
+// use. The runner reports these facts back to the control plane before apply,
+// including when Helm subsequently fails.
+func (b *HelmDirectBackend) DeploymentTarget(environment domain.Environment, projectConfig domain.ProjectConfig) (string, string, error) {
+	config := resolveHelmDirectConfig(projectConfig)
+	releaseName, err := b.renderReleaseName(environment, projectConfig)
+	if err != nil {
+		return "", "", err
+	}
+	return releaseName, b.targetNamespace(environment, config), nil
+}
+
 func (b *HelmDirectBackend) helmValuesFile(environment domain.Environment) (string, func() error, error) {
 	valuesFile := strings.TrimSpace(environment.GitOps.ValuesPath)
 	if valuesFile != "" {

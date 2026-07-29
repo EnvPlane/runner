@@ -441,6 +441,30 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
+	backend := NewHelmDirectBackend(nil)
+	environment := domain.Environment{
+		ID: "envpilot-e2e-full-01", Project: "bethunder-e2e-20260729", Namespace: "envpilot-e2e-full-01",
+	}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{
+			"backend":             "helm_direct",
+			"releaseNameTemplate": "{{ .project.id }}-{{ .environment.id }}",
+		},
+	}}
+
+	release, namespace, err := backend.DeploymentTarget(environment, projectConfig)
+	if err != nil {
+		t.Fatalf("deployment target: %v", err)
+	}
+	if release != "bethunder-e2e-20260729-envpilot-e2e-full-01" {
+		t.Fatalf("release = %q", release)
+	}
+	if namespace != "envpilot-e2e-full-01" {
+		t.Fatalf("namespace = %q", namespace)
+	}
+}
+
 func TestHelmDirectBackendRenderCustomEnvironmentMetadataAndValues(t *testing.T) {
 	backend := NewHelmDirectBackend(nil)
 	environment := domain.Environment{
