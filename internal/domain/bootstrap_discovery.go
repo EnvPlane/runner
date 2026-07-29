@@ -193,6 +193,14 @@ type RunnerDeploymentInstructionsRequest struct {
 	GitOpsPathSnake string `json:"git_ops_path,omitempty"`
 }
 
+// RunnerBootstrapCredentialsRotateRequest mirrors the control-plane contract.
+// The runner consumes the resulting bootstrap Secret rather than serving this
+// API, but retaining the type here keeps the split repositories version-aware.
+type RunnerBootstrapCredentialsRotateRequest struct {
+	RunnerDeploymentInstructionsRequest
+	Reason string `json:"reason"`
+}
+
 type RunnerDeploymentInstructionsResponse struct {
 	ProjectID                       string               `json:"projectId"`
 	ClusterID                       string               `json:"clusterId"`
@@ -209,6 +217,7 @@ type RunnerDeploymentInstructionsResponse struct {
 	GitOpsPath                      string               `json:"gitOpsPath,omitempty"`
 	GitOpsManifest                  string               `json:"gitOpsManifest,omitempty"`
 	Status                          string               `json:"status"`
+	TokenState                      string               `json:"tokenState,omitempty"`
 }
 
 // Backward-compatible aliases. Prefer RunnerDeploymentInstructionsRequest/Response.
@@ -224,6 +233,8 @@ type RunnerStatusResponse struct {
 	LastSeenAt       *time.Time `json:"lastSeenAt,omitempty"`
 	TokenExpiresAt   *time.Time `json:"tokenExpiresAt,omitempty"`
 	TokenIssuedAt    *time.Time `json:"tokenIssuedAt,omitempty"`
+	TokenState       string     `json:"tokenState,omitempty"`
+	TokenRotatedAt   *time.Time `json:"tokenRotatedAt,omitempty"`
 	Error            string     `json:"error,omitempty"`
 	ProjectConfigURL string     `json:"projectConfigUrl,omitempty"`
 }
