@@ -363,7 +363,11 @@ func sanitizeResourceManifest(kind string, raw map[string]any, namespace string,
 		return nil
 	}
 	manifest := map[string]any{}
-	if apiVersion := strings.TrimSpace(stringifyAny(raw["apiVersion"])); apiVersion != "" {
+	apiVersion := strings.TrimSpace(stringifyAny(raw["apiVersion"]))
+	if apiVersion == "" {
+		apiVersion = defaultResourceAPIVersion(kind)
+	}
+	if apiVersion != "" {
 		manifest["apiVersion"] = apiVersion
 	}
 	manifest["kind"] = kind
@@ -405,6 +409,24 @@ func sanitizeResourceManifest(kind string, raw map[string]any, namespace string,
 		}
 	}
 	return manifest
+}
+
+// defaultResourceAPIVersion keeps scanner-derived manifests valid when a
+// Kubernetes list fixture or intermediary omits per-item apiVersion. The
+// scanner only synthesizes manifests for these built-in resource kinds.
+func defaultResourceAPIVersion(kind string) string {
+	switch strings.TrimSpace(kind) {
+	case "Deployment", "StatefulSet":
+		return "apps/v1"
+	case "Ingress":
+		return "networking.k8s.io/v1"
+	case "Job", "CronJob":
+		return "batch/v1"
+	case "Namespace", "Service", "ConfigMap", "ResourceQuota", "LimitRange", "Secret", "PersistentVolumeClaim", "ServiceAccount":
+		return "v1"
+	default:
+		return ""
+	}
 }
 
 func deepCopyJSONValue(value any) any {
