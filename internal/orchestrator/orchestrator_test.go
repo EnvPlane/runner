@@ -612,11 +612,35 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 	if call.Options.Wait != true {
 		t.Fatalf("expected wait=true")
 	}
+	if call.Options.CreateNamespace != true {
+		t.Fatalf("expected createNamespace=true by default")
+	}
 	if call.Options.Timeout != 120 {
 		t.Fatalf("timeout = %d", call.Options.Timeout)
 	}
 	if call.Options.ValuesFile != "values-preview.yaml" {
 		t.Fatalf("values file = %q", call.Options.ValuesFile)
+	}
+}
+
+func TestHelmDirectBackendApplyHonorsCreateNamespaceFalse(t *testing.T) {
+	executor := &fakeHelmExecutor{}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{
+		ID: "pr-101", Project: "proj-101", Namespace: "envpilot-pr-101",
+		Charts: domain.ChartVersions{App: "payments-chart"},
+	}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{
+			"backend": "helm_direct",
+			"helmDirect": map[string]any{"createNamespace": false},
+		},
+	}}
+	if err := backend.Apply(context.Background(), environment, projectConfig); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(executor.calls) != 1 || executor.calls[0].Options.CreateNamespace {
+		t.Fatalf("expected create namespace disabled, calls=%+v", executor.calls)
 	}
 }
 
@@ -908,12 +932,13 @@ func TestCLIHelmExecutorBuildsUpgradeInstallCommand(t *testing.T) {
 		},
 	}
 	err := executor.UpgradeInstall(context.Background(), HelmUpgradeOptions{
-		ReleaseName: "test-release",
-		ChartRef:    "charts/test",
-		Namespace:   "feature-ns",
-		ValuesFile:  "values.yaml",
-		Wait:        true,
-		Timeout:     45,
+		ReleaseName:     "test-release",
+		ChartRef:        "charts/test",
+		Namespace:       "feature-ns",
+		ValuesFile:      "values.yaml",
+		CreateNamespace: true,
+		Wait:            true,
+		Timeout:         45,
 	})
 	if err != nil {
 		t.Fatalf("expected success: %v", err)
@@ -928,6 +953,29 @@ func TestCLIHelmExecutorBuildsUpgradeInstallCommand(t *testing.T) {
 	for _, required := range []string{"upgrade", "--install", "test-release", "charts/test", "--namespace", "feature-ns", "--create-namespace", "-f", "values.yaml", "--wait", "--timeout", "45s"} {
 		if !requireArg[required] {
 			t.Fatalf("missing arg %q in %v", required, capturedArgs)
+		}
+	}
+}
+
+func TestCLIHelmExecutorOmitsCreateNamespaceWhenDisabled(t *testing.T) {
+	var capturedArgs []string
+	executor := &CLIHelmExecutor{
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil
+		},
+	}
+	if err := executor.UpgradeInstall(context.Background(), HelmUpgradeOptions{
+		ReleaseName:     "test-release",
+		ChartRef:        "charts/test",
+		Namespace:       "feature-ns",
+		CreateNamespace: false,
+	}); err != nil {
+		t.Fatalf("expected success: %v", err)
+	}
+	for _, arg := range capturedArgs {
+		if arg == "--create-namespace" {
+			t.Fatalf("did not expect --create-namespace in %v", capturedArgs)
 		}
 	}
 }

@@ -47,12 +47,13 @@ type deploymentBackendWithWriter interface {
 }
 
 type HelmUpgradeOptions struct {
-	ReleaseName string
-	ChartRef    string
-	Namespace   string
-	ValuesFile  string
-	Wait        bool
-	Timeout     int
+	ReleaseName     string
+	ChartRef        string
+	Namespace       string
+	ValuesFile      string
+	CreateNamespace bool
+	Wait            bool
+	Timeout         int
 }
 
 type HelmExecutor interface {
@@ -126,7 +127,9 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 		options.ChartRef,
 		"--namespace",
 		options.Namespace,
-		"--create-namespace",
+	}
+	if options.CreateNamespace {
+		args = append(args, "--create-namespace")
 	}
 	if strings.TrimSpace(options.ValuesFile) != "" {
 		args = append(args, "-f", options.ValuesFile)
@@ -494,12 +497,13 @@ func (b *HelmDirectBackend) Apply(ctx context.Context, environment domain.Enviro
 		_ = cleanup()
 	}()
 	return b.helmExecutor.UpgradeInstall(ctx, HelmUpgradeOptions{
-		ReleaseName: releaseName,
-		ChartRef:    b.chartRef(environment),
-		Namespace:   namespace,
-		ValuesFile:  valuesFile,
-		Wait:        config.wait,
-		Timeout:     config.timeout,
+		ReleaseName:     releaseName,
+		ChartRef:        b.chartRef(environment),
+		Namespace:       namespace,
+		ValuesFile:      valuesFile,
+		CreateNamespace: config.createNamespace,
+		Wait:            config.wait,
+		Timeout:         config.timeout,
 	})
 }
 
@@ -766,6 +770,7 @@ type helmDirectConfig struct {
 	releaseNamePattern string
 	timeout            int
 	wait               bool
+	createNamespace    bool
 }
 
 func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfig {
@@ -774,6 +779,7 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 		releaseNamePattern: "{{ .project.id }}-{{ .environment.name }}",
 		timeout:            300,
 		wait:               true,
+		createNamespace:    true,
 	}
 	rawDeployment, ok := projectConfig.Config["deployment"]
 	if !ok {
@@ -806,6 +812,9 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 	}
 	if value, ok := helmDirectConfigValue["wait"]; ok {
 		config.wait = asBool(value)
+	}
+	if value, ok := helmDirectConfigValue["createNamespace"]; ok {
+		config.createNamespace = asBool(value)
 	}
 	return config
 }
