@@ -172,6 +172,34 @@ func TestPollRunnerCommandsOnceDegradesAndStopsForMissingEndpoint(t *testing.T) 
 	}
 }
 
+func TestPollRunnerCommandsOnceStopsForMissingBootstrapSession(t *testing.T) {
+	polls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		polls++
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"bootstrap session not found","code":"bootstrap_session_not_found","recovery":"rotate_runner_bootstrap_credentials"}`)),
+			Request:    request,
+		}, nil
+	})}
+
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	state := newRunnerRuntimeState()
+	health := &runnerHealth{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if keepPolling := pollRunnerCommandsOnce(context.Background(), cfg, client, state, health, logger); keepPolling {
+		t.Fatal("missing bootstrap session must disable command polling")
+	}
+	status, reason := state.heartbeat()
+	if !state.stale.Load() || !health.stale.Load() || health.online.Load() || status != string(domain.RunnerHeartbeatStatusDegraded) || reason == "" {
+		t.Fatalf("stale runtime state = status=%q reason=%q stale=%v health=%+v", status, reason, state.stale.Load(), health)
+	}
+	if polls != 1 {
+		t.Fatalf("stale identity must be polled once, got %d polls", polls)
+	}
+}
+
 func TestClassifyHelmChartPreflightError(t *testing.T) {
 	tests := []struct {
 		name string
