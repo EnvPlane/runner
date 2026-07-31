@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -455,9 +456,18 @@ type runnerConfig struct {
 
 func runnerConfigFromEnv() runnerConfig {
 	authTokenFile := getenv("ENVPILOT_RUNNER_AUTH_TOKEN_FILE", "")
+	registrationToken := getenv("ENVPILOT_RUNNER_REGISTRATION_TOKEN", "")
 	authToken := getenv("ENVPILOT_RUNNER_AUTH_TOKEN", "")
 	if strings.TrimSpace(authToken) == "" {
 		authToken = readRuntimeTokenFile(authTokenFile)
+	}
+	// A bootstrap-token rotation updates the runner Secret, but the runner auth
+	// token deliberately survives in the auth PVC. Prefer the new one-time token
+	// only when it is demonstrably newer than the token that produced the
+	// persisted auth token. This preserves ordinary restarts while allowing an
+	// in-place Secret update plus rollout to recover the same release.
+	if registrationTokenChanged(authTokenFile, registrationToken) {
+		authToken = ""
 	}
 	return runnerConfig{
 		ControlPlaneURL:     strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
@@ -466,7 +476,7 @@ func runnerConfigFromEnv() runnerConfig {
 		RunnerID:            getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
 		RunnerNamespace:     getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
 		DeploymentMode:      strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
-		RegistrationToken:   getenv("ENVPILOT_RUNNER_REGISTRATION_TOKEN", ""),
+		RegistrationToken:   registrationToken,
 		RunnerAuthToken:     authToken,
 		RunnerAuthTokenFile: authTokenFile,
 		ProjectConfigURL:    getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
@@ -527,6 +537,11 @@ func runRunner(logger *slog.Logger) {
 	var registeredNow bool
 	cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 	if err != nil {
+		if isRunnerStaleBootstrapIdentityError(err) {
+			markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
+			<-ctx.Done()
+			return
+		}
 		health.set(false)
 		logger.Error("runner registration failed", "error", err)
 		os.Exit(1)
@@ -537,6 +552,11 @@ func runRunner(logger *slog.Logger) {
 		}
 	}
 	if err := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusOnline), ""); err != nil {
+		if isRunnerStaleBootstrapIdentityError(err) {
+			markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
+			<-ctx.Done()
+			return
+		}
 		health.set(false)
 		logger.Error("initial runner heartbeat failed", "error", err)
 		os.Exit(1)
@@ -550,6 +570,7 @@ func runRunner(logger *slog.Logger) {
 type runnerHealth struct {
 	online   atomic.Bool
 	degraded atomic.Bool
+	stale    atomic.Bool
 }
 
 func (h *runnerHealth) set(online bool) {
@@ -561,9 +582,29 @@ func (h *runnerHealth) setDegraded() {
 	h.online.Store(false)
 }
 
+func (h *runnerHealth) setStaleBootstrapIdentity() {
+	h.stale.Store(true)
+	h.degraded.Store(true)
+	h.online.Store(false)
+}
+
 func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, logger *slog.Logger) {
 	mux := http.NewServeMux()
+	mux.HandleFunc("/livez", func(w http.ResponseWriter, _ *http.Request) {
+		// A stale bootstrap identity needs operator recovery, not a CrashLoop.
+		// Keep the process live so its readiness/status is observable until a
+		// rotated Secret is applied and the Deployment is restarted.
+		writeRunnerJSON(w, http.StatusOK, map[string]any{"status": "alive"})
+	})
 	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		if health.stale.Load() {
+			writeRunnerJSON(w, http.StatusServiceUnavailable, map[string]any{
+				"status":   "stale_bootstrap_identity",
+				"reason":   "The bootstrap session or runner credentials are no longer valid.",
+				"recovery": "Rotate runner bootstrap credentials, apply the regenerated Secret, then restart or helm upgrade the existing runner release.",
+			})
+			return
+		}
 		if health.degraded.Load() {
 			writeRunnerJSON(w, http.StatusServiceUnavailable, map[string]any{"status": "degraded"})
 			return
@@ -592,6 +633,7 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 type runnerRuntimeState struct {
 	status atomic.Value
 	error  atomic.Value
+	stale  atomic.Bool
 }
 
 func newRunnerRuntimeState() *runnerRuntimeState {
@@ -608,6 +650,18 @@ func (s *runnerRuntimeState) heartbeat() (string, string) {
 func (s *runnerRuntimeState) setDegraded(reason string) {
 	s.status.Store(string(domain.RunnerHeartbeatStatusDegraded))
 	s.error.Store(strings.TrimSpace(reason))
+}
+
+func (s *runnerRuntimeState) setStaleBootstrapIdentity(reason string) {
+	s.setDegraded(reason)
+	s.stale.Store(true)
+}
+
+func markRunnerStaleBootstrapIdentity(state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger, cause error) {
+	reason := "Runner bootstrap identity is stale: rotate bootstrap credentials, apply the regenerated Secret, then restart or helm upgrade this release."
+	state.setStaleBootstrapIdentity(reason)
+	health.setStaleBootstrapIdentity()
+	logger.Error("runner bootstrap identity is stale; waiting for rotated credentials", "error", cause)
 }
 
 func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http.Client, logger *slog.Logger) (runnerConfig, bool, error) {
@@ -636,6 +690,9 @@ func ensureRunnerRuntimeAuth(ctx context.Context, cfg runnerConfig, client *http
 	}
 	if err := persistRuntimeToken(cfg.RunnerAuthTokenFile, token); err != nil {
 		return cfg, false, fmt.Errorf("persist runner auth token: %w", err)
+	}
+	if err := persistRegistrationTokenFingerprint(cfg.RunnerAuthTokenFile, cfg.RegistrationToken); err != nil {
+		return cfg, false, fmt.Errorf("persist runner registration token fingerprint: %w", err)
 	}
 	cfg.RunnerAuthToken = token
 	cfg.RegistrationToken = ""
@@ -668,8 +725,17 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if state.stale.Load() {
+				<-ctx.Done()
+				return
+			}
 			status, statusError := state.heartbeat()
 			if err := reportRunnerHeartbeat(ctx, cfg, client, status, statusError); err != nil {
+				if isRunnerStaleBootstrapIdentityError(err) {
+					markRunnerStaleBootstrapIdentity(state, health, logger, err)
+					<-ctx.Done()
+					return
+				}
 				health.set(false)
 				logger.Error("runner heartbeat failed", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID, "error", err)
 				continue
@@ -691,6 +757,9 @@ func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Clien
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if state.stale.Load() {
+				return
+			}
 			if !pollRunnerCommandsOnce(ctx, cfg, client, state, health, logger) {
 				return
 			}
@@ -704,6 +773,10 @@ func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Clien
 func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) bool {
 	command, found, err := nextRunnerCommand(ctx, cfg, client)
 	if err != nil {
+		if isRunnerStaleBootstrapIdentityError(err) {
+			markRunnerStaleBootstrapIdentity(state, health, logger, err)
+			return false
+		}
 		if isRunnerCommandAPIIncompatible(err) {
 			reason := "Runner command API is unavailable or incompatible: " + err.Error()
 			state.setDegraded(reason)
@@ -773,6 +846,28 @@ func isRunnerCommandAuthenticationError(err error) bool {
 	return errors.As(err, &auth)
 }
 
+type runnerAPIError struct {
+	status   int
+	code     string
+	detail   string
+	recovery string
+}
+
+func (e runnerAPIError) Error() string {
+	if e.code != "" {
+		return fmt.Sprintf("runner API request failed: status=%d code=%s detail=%s", e.status, e.code, e.detail)
+	}
+	return fmt.Sprintf("runner API request failed: status=%d detail=%s", e.status, e.detail)
+}
+
+func isRunnerStaleBootstrapIdentityError(err error) bool {
+	var apiError runnerAPIError
+	if errors.As(err, &apiError) {
+		return apiError.code == "bootstrap_session_not_found" || apiError.code == "stale_runner_bootstrap_identity"
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "bootstrap session not found")
+}
+
 func isRunnerCommandTransportError(err error) bool {
 	var transport runnerCommandTransportError
 	return errors.As(err, &transport)
@@ -800,6 +895,9 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		detail := fmt.Sprintf("status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(body)))
+		if code, recovery, ok := runnerBootstrapIdentityErrorBody(body); ok {
+			return domain.RunnerCommand{}, false, runnerAPIError{status: resp.StatusCode, code: code, detail: detail, recovery: recovery}
+		}
 		if resp.StatusCode == http.StatusNotFound {
 			return domain.RunnerCommand{}, false, runnerCommandEndpointMissingError{detail: detail}
 		}
@@ -973,7 +1071,24 @@ func runnerPostJSONWithHeaders(ctx context.Context, client *http.Client, endpoin
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("POST %s failed: status=%d body=%s", endpoint, resp.StatusCode, strings.TrimSpace(string(responseBody)))
+		var response struct {
+			Code     string `json:"code"`
+			Error    string `json:"error"`
+			Recovery string `json:"recovery"`
+		}
+		_ = json.Unmarshal(responseBody, &response)
+		detail := strings.TrimSpace(response.Error)
+		if detail == "" {
+			detail = strings.TrimSpace(string(responseBody))
+		}
+		if response.Code == "bootstrap_session_not_found" || response.Code == "stale_runner_bootstrap_identity" || strings.Contains(strings.ToLower(detail), "bootstrap session not found") {
+			code := strings.TrimSpace(response.Code)
+			if code == "" {
+				code = "bootstrap_session_not_found"
+			}
+			return runnerAPIError{status: resp.StatusCode, code: code, detail: detail, recovery: response.Recovery}
+		}
+		return runnerAPIError{status: resp.StatusCode, code: strings.TrimSpace(response.Code), detail: detail, recovery: strings.TrimSpace(response.Recovery)}
 	}
 	if target != nil {
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(target); err != nil && !errors.Is(err, io.EOF) {
@@ -981,6 +1096,23 @@ func runnerPostJSONWithHeaders(ctx context.Context, client *http.Client, endpoin
 		}
 	}
 	return nil
+}
+
+func runnerBootstrapIdentityErrorBody(body []byte) (string, string, bool) {
+	var response struct {
+		Code     string `json:"code"`
+		Recovery string `json:"recovery"`
+	}
+	if json.Unmarshal(body, &response) == nil {
+		code := strings.TrimSpace(response.Code)
+		if code == "bootstrap_session_not_found" || code == "stale_runner_bootstrap_identity" {
+			return code, strings.TrimSpace(response.Recovery), true
+		}
+	}
+	if strings.Contains(strings.ToLower(string(body)), "bootstrap session not found") {
+		return "bootstrap_session_not_found", "", true
+	}
+	return "", "", false
 }
 
 func writeRunnerJSON(w http.ResponseWriter, status int, payload any) {
@@ -1011,6 +1143,52 @@ func persistRuntimeToken(path string, token string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(token+"\n"), 0o600)
+}
+
+func registrationTokenFingerprintPath(authTokenPath string) string {
+	authTokenPath = strings.TrimSpace(authTokenPath)
+	if authTokenPath == "" {
+		return ""
+	}
+	return authTokenPath + ".registration-token-sha256"
+}
+
+func registrationTokenFingerprint(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(token))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func registrationTokenChanged(authTokenPath, registrationToken string) bool {
+	want := registrationTokenFingerprint(registrationToken)
+	path := registrationTokenFingerprintPath(authTokenPath)
+	if want == "" || path == "" {
+		return false
+	}
+	have := strings.TrimSpace(readRuntimeTokenFile(path))
+	// Existing auth PVCs predate the fingerprint. Adopt the current bootstrap
+	// token on their first upgraded restart so they keep working; a later token
+	// rotation will then be detected deterministically.
+	if have == "" {
+		_ = persistRegistrationTokenFingerprint(authTokenPath, registrationToken)
+		return false
+	}
+	return have != want
+}
+
+func persistRegistrationTokenFingerprint(authTokenPath, registrationToken string) error {
+	path := registrationTokenFingerprintPath(authTokenPath)
+	fingerprint := registrationTokenFingerprint(registrationToken)
+	if path == "" || fingerprint == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, []byte(fingerprint+"\n"), 0o600)
 }
 
 func hostnameFallback(fallback string) string {

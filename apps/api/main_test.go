@@ -80,6 +80,58 @@ func TestNextRunnerCommandClassifiesTransportFailure(t *testing.T) {
 	}
 }
 
+func TestRunnerPostJSONClassifiesMissingBootstrapSessionForRecovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"error":"bootstrap session not found","code":"bootstrap_session_not_found",` +
+				`"recovery":"rotate_runner_bootstrap_credentials"}`)),
+			Request: request,
+		}, nil
+	})}
+	err := reportRunnerHeartbeat(context.Background(), runnerConfig{
+		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
+	}, client, string(domain.RunnerHeartbeatStatusOnline), "")
+	if err == nil || !isRunnerStaleBootstrapIdentityError(err) {
+		t.Fatalf("heartbeat error = %v, want stale bootstrap identity", err)
+	}
+}
+
+func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
+	if err := persistRuntimeToken(authPath, "old-runner-auth"); err != nil {
+		t.Fatalf("persist auth token: %v", err)
+	}
+	if err := persistRegistrationTokenFingerprint(authPath, "old-registration-token"); err != nil {
+		t.Fatalf("persist old registration token fingerprint: %v", err)
+	}
+	t.Setenv("ENVPILOT_RUNNER_AUTH_TOKEN_FILE", authPath)
+	t.Setenv("ENVPILOT_RUNNER_REGISTRATION_TOKEN", "rotated-registration-token")
+	t.Setenv("ENVPILOT_RUNNER_AUTH_TOKEN", "")
+
+	cfg := runnerConfigFromEnv()
+	if cfg.RunnerAuthToken != "" {
+		t.Fatalf("rotated bootstrap token must override persisted auth, got %q", cfg.RunnerAuthToken)
+	}
+	if cfg.RegistrationToken != "rotated-registration-token" {
+		t.Fatalf("registration token = %q", cfg.RegistrationToken)
+	}
+}
+
+func TestRunnerRegistrationTokenFingerprintAdoptsLegacyAuthThenDetectsRotation(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
+	if err := persistRuntimeToken(authPath, "legacy-runner-auth"); err != nil {
+		t.Fatalf("persist auth token: %v", err)
+	}
+	if registrationTokenChanged(authPath, "initial-registration-token") {
+		t.Fatal("legacy auth must be adopted without forcing a consumed-token registration")
+	}
+	if !registrationTokenChanged(authPath, "rotated-registration-token") {
+		t.Fatal("changed bootstrap token must trigger a new registration")
+	}
+}
+
 func TestPollRunnerCommandsOnceDegradesAndStopsForMissingEndpoint(t *testing.T) {
 	polls := 0
 	heartbeats := 0

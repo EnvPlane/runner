@@ -130,7 +130,10 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: /health
+              # Readiness reports a stale bootstrap identity as unavailable,
+              # but liveness must keep the pod running for an in-place token
+              # rotation and rollout recovery.
+              path: /livez
               port: {{ .Values.service.targetPort }}
             initialDelaySeconds: 15
             periodSeconds: 10
