@@ -348,7 +348,7 @@ func runAgentInstallCheckFlow(ctx context.Context, cfg agent.Config, source agen
 		return agent.ClusterCapabilities{}, err
 	}
 	if namespaceSource, ok := source.(*agent.KubernetesNamespaceSource); ok && len(cfg.Namespaces) > 0 {
-		scanner := agent.NewResourceDiscoveryScanner(namespaceSource)
+		scanner := agent.NewResourceDiscoveryScanner(namespaceSource, cfg.ReadSecrets)
 		scanResult, scanErr := scanner.Scan(ctx, cfg.Namespaces)
 		if scanErr != nil {
 			return agent.ClusterCapabilities{}, scanErr
@@ -424,7 +424,7 @@ func runAgentResourceScanTick(ctx context.Context, cfg agent.Config, reporter *a
 	if task == nil || len(task.Namespaces) == 0 {
 		return nil
 	}
-	scanner := agent.NewResourceDiscoveryScanner(source)
+	scanner := agent.NewResourceDiscoveryScanner(source, cfg.ReadSecrets)
 	result, err := scanner.Scan(ctx, task.Namespaces)
 	if err != nil {
 		return err

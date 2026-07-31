@@ -7,7 +7,6 @@ on:
       - 'Dockerfile'
       - 'apps/**'
       - 'internal/**'
-      - 'deploy/helm/**'
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/publish-main.yaml'
@@ -53,22 +52,8 @@ jobs:
       - name: Test runner
         working-directory: runner
         run: go test ./...
-      - uses: azure/setup-helm@v4
-      - name: Lint and package runner chart
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          helm lint runner/deploy/helm/envpilot-runner
-          base_version="$(awk -F': ' '$1 == "version" {print $2; exit}' runner/deploy/helm/envpilot-runner/Chart.yaml)"
-          version="${base_version}-main.${GITHUB_RUN_NUMBER}"
-          helm package runner/deploy/helm/envpilot-runner --destination dist --version "$version" --app-version "$version"
-      - name: Authenticate to GHCR for charts
-        run: echo "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN || secrets.GITHUB_TOKEN }}
-      - name: Publish runner chart
-        run: helm push dist/*.tgz oci://ghcr.io/${{ github.repository_owner }}
+      - name: Verify Runner has no local chart source
+        run: deploy/scripts/check-canonical-chart-sources.sh --deploy "$GITHUB_WORKSPACE/deploy" --runner "$GITHUB_WORKSPACE/runner"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:

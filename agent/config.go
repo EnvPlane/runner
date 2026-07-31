@@ -30,6 +30,7 @@ type Config struct {
 	KubernetesCA       string
 	NamespaceSelector  string
 	Namespaces         []string
+	ReadSecrets        bool
 	FluxNamespace      string
 	ResyncInterval     time.Duration
 	ReportTimeout      time.Duration
@@ -57,6 +58,7 @@ func ConfigFromEnv() Config {
 		KubernetesCA:       getenv("ENVPILOT_KUBERNETES_CA_PATH", defaultServiceAccountCA),
 		NamespaceSelector:  getenv("ENVPILOT_WATCH_NAMESPACE_SELECTOR", defaultNamespaceSelector),
 		Namespaces:         splitCSV(getenv("ENVPILOT_WATCH_NAMESPACES", "")),
+		ReadSecrets:        getenvBool("ENVPILOT_DISCOVERY_READ_SECRETS", false),
 		FluxNamespace:      getenv("ENVPILOT_FLUX_NAMESPACE", "flux-system"),
 		ResyncInterval:     time.Duration(getenvInt("ENVPILOT_AGENT_RESYNC_SECONDS", 30)) * time.Second,
 		ReportTimeout:      time.Duration(getenvInt("ENVPILOT_AGENT_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
@@ -141,6 +143,18 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
+}
+
+func getenvBool(key string, fallback bool) bool {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(value)
 	if err != nil {
 		return fallback
 	}

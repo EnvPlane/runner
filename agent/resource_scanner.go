@@ -14,7 +14,8 @@ import (
 )
 
 type ResourceDiscoveryScanner struct {
-	source *KubernetesNamespaceSource
+	source      *KubernetesNamespaceSource
+	readSecrets bool
 }
 
 type ResourceScanResult struct {
@@ -24,8 +25,12 @@ type ResourceScanResult struct {
 	PermissionWarnings []string
 }
 
-func NewResourceDiscoveryScanner(source *KubernetesNamespaceSource) *ResourceDiscoveryScanner {
-	return &ResourceDiscoveryScanner{source: source}
+func NewResourceDiscoveryScanner(source *KubernetesNamespaceSource, readSecrets ...bool) *ResourceDiscoveryScanner {
+	enabled := false
+	if len(readSecrets) > 0 {
+		enabled = readSecrets[0]
+	}
+	return &ResourceDiscoveryScanner{source: source, readSecrets: enabled}
 }
 
 func (s *ResourceDiscoveryScanner) Scan(ctx context.Context, namespaces []string) (ResourceScanResult, error) {
@@ -51,7 +56,7 @@ func (s *ResourceDiscoveryScanner) Scan(ctx context.Context, namespaces []string
 		if namespaceSnapshot.Name != "" {
 			items = append(items, namespaceSnapshot)
 		}
-		for _, target := range []struct {
+		targets := []struct {
 			kind     string
 			endpoint string
 		}{
@@ -62,12 +67,18 @@ func (s *ResourceDiscoveryScanner) Scan(ctx context.Context, namespaces []string
 			{kind: "ConfigMap", endpoint: "/api/v1/namespaces/%s/configmaps"},
 			{kind: "ResourceQuota", endpoint: "/api/v1/namespaces/%s/resourcequotas"},
 			{kind: "LimitRange", endpoint: "/api/v1/namespaces/%s/limitranges"},
-			{kind: "Secret", endpoint: "/api/v1/namespaces/%s/secrets"},
 			{kind: "PersistentVolumeClaim", endpoint: "/api/v1/namespaces/%s/persistentvolumeclaims"},
 			{kind: "Job", endpoint: "/apis/batch/v1/namespaces/%s/jobs"},
 			{kind: "CronJob", endpoint: "/apis/batch/v1/namespaces/%s/cronjobs"},
 			{kind: "ServiceAccount", endpoint: "/api/v1/namespaces/%s/serviceaccounts"},
-		} {
+		}
+		if s.readSecrets {
+			targets = append(targets, struct {
+				kind     string
+				endpoint string
+			}{kind: "Secret", endpoint: "/api/v1/namespaces/%s/secrets"})
+		}
+		for _, target := range targets {
 			snapshots, warning, err := s.listNamespaceResources(ctx, namespace, target.kind, fmt.Sprintf(target.endpoint, url.PathEscape(namespace)))
 			if err != nil {
 				return ResourceScanResult{}, err
