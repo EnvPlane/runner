@@ -1,8 +1,9 @@
-name: Publish runner image and chart (main)
+name: Publish runner image
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
     paths:
       - 'Dockerfile'
       - 'apps/**'
@@ -15,6 +16,8 @@ on:
 permissions:
   contents: read
   packages: write
+  attestations: write
+  id-token: write
 
 concurrency:
   group: publish-runner-main
@@ -23,6 +26,12 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    outputs:
+      component: ${{ steps.published.outputs.component }}
+      repository: ${{ steps.published.outputs.repository }}
+      tag: ${{ steps.published.outputs.tag }}
+      digest: ${{ steps.published.outputs.digest }}
+      metadata: ${{ steps.published.outputs.metadata }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,13 +74,44 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/runner
           tags: |
-            type=raw,value=main
-            type=raw,value=latest
-            type=sha,prefix=sha-
-      - uses: docker/build-push-action@v6
+            type=raw,value=sha-${{ github.sha }}
+            type=semver,pattern={{version}}
+      - id: build
+        uses: docker/build-push-action@v6
         with:
           context: runner
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          provenance: mode=max
+          sbom: true
+      - id: published
+        name: Emit immutable image metadata
+        env:
+          COMPONENT: runner
+          REPOSITORY: ghcr.io/${{ github.repository_owner }}/runner
+          TAG: sha-${{ github.sha }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          set -euo pipefail
+          test -n "$DIGEST"
+          metadata="$(jq -cn \
+            --arg component "$COMPONENT" \
+            --arg repository "$REPOSITORY" \
+            --arg tag "$TAG" \
+            --arg digest "$DIGEST" \
+            '{component: $component, repository: $repository, tag: $tag, digest: $digest}')"
+          printf '%s\n' "$metadata" | tee image-metadata.json
+          {
+            echo "component=$COMPONENT"
+            echo "repository=$REPOSITORY"
+            echo "tag=$TAG"
+            echo "digest=$DIGEST"
+            echo "metadata=$metadata"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runner-image-metadata
+          path: image-metadata.json
+          if-no-files-found: error
