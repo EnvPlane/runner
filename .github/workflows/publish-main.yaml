@@ -26,11 +26,29 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          path: runner
+      - uses: actions/checkout@v4
+        with:
+          repository: envpilot/bootstrap
+          path: bootstrap
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          repository: envpilot/deploy
+          path: deploy
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          repository: envpilot/frontend
+          path: frontend
+          ref: main
       - uses: actions/setup-go@v5
         with:
-          go-version-file: go.mod
+          go-version-file: runner/go.mod
           cache: true
       - name: Test runner
+        working-directory: runner
         run: go test ./...
       - uses: azure/setup-helm@v4
       - name: Lint and package runner chart
@@ -38,10 +56,10 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          helm lint deploy/helm/envpilot-runner
-          base_version="$(awk -F': ' '$1 == "version" {print $2; exit}' deploy/helm/envpilot-runner/Chart.yaml)"
+          helm lint runner/deploy/helm/envpilot-runner
+          base_version="$(awk -F': ' '$1 == "version" {print $2; exit}' runner/deploy/helm/envpilot-runner/Chart.yaml)"
           version="${base_version}-main.${GITHUB_RUN_NUMBER}"
-          helm package deploy/helm/envpilot-runner --destination dist --version "$version" --app-version "$version"
+          helm package runner/deploy/helm/envpilot-runner --destination dist --version "$version" --app-version "$version"
       - name: Authenticate to GHCR for charts
         run: echo "$GHCR_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
         env:
@@ -64,7 +82,7 @@ jobs:
             type=sha,prefix=sha-
       - uses: docker/build-push-action@v6
         with:
-          context: .
+          context: runner
           push: true
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.metadata.outputs.tags }}
