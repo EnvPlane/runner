@@ -143,7 +143,7 @@ jobs:
           path: image-metadata.json
           if-no-files-found: error
       - id: dispatch_auth
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         name: Select deploy dispatch authentication
         env:
           APP_ID: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
@@ -161,7 +161,7 @@ jobs:
             exit 1
           fi
       - id: deploy_dispatch_app
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         uses: actions/create-github-app-token@v1
         with:
           app-id: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
@@ -170,7 +170,7 @@ jobs:
           repositories: deploy
           permission-contents: write
       - name: Dispatch immutable image update with GitHub App
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         env:
           GH_TOKEN: ${{ steps.deploy_dispatch_app.outputs.token }}
           METADATA: ${{ steps.published.outputs.metadata }}
@@ -183,7 +183,7 @@ jobs:
             --header "X-GitHub-Api-Version: 2022-11-28" \
             --data "$(jq -cn --argjson payload "$METADATA" --arg source_repository "${{ github.repository }}" --arg source_revision "${{ github.sha }}" '{event_type:"component-image-published",client_payload:$payload + {source_repository:$source_repository,source_revision:$source_revision,publication_id:($payload.component + ":" + $source_revision + ":" + $payload.digest)}}')"
       - name: Dispatch immutable image update with PAT fallback
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
         env:
           GH_TOKEN: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_PAT }}
           METADATA: ${{ steps.published.outputs.metadata }}
