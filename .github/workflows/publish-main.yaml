@@ -25,6 +25,7 @@ concurrency:
 
 jobs:
   publish:
+    if: github.repository == 'envpilot/runner' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     outputs:
       component: ${{ steps.published.outputs.component }}
@@ -36,22 +37,48 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: runner
+      - id: source_read_auth
+        name: Select source checkout authentication
+        env:
+          APP_ID: ${{ secrets.ENVPILOT_SOURCE_READ_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_SOURCE_READ_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPILOT_SOURCE_READ_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]; then
+            echo "method=app" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$FALLBACK_PAT" ]]; then
+            echo "method=pat" >> "$GITHUB_OUTPUT"
+            echo "::warning::Using fine-grained PAT fallback for source checkouts."
+          else
+            echo "No source-read GitHub App credentials or fallback PAT is configured." >&2
+            exit 1
+          fi
+      - id: source_read_app
+        if: steps.source_read_auth.outputs.method == 'app'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ENVPILOT_SOURCE_READ_APP_ID }}
+          private-key: ${{ secrets.ENVPILOT_SOURCE_READ_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: bootstrap,deploy,frontend
+          permission-contents: read
       - uses: actions/checkout@v4
         with:
           repository: envpilot/bootstrap
-          token: ${{ secrets.REPO_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
           path: bootstrap
           ref: main
       - uses: actions/checkout@v4
         with:
           repository: envpilot/deploy
-          token: ${{ secrets.REPO_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
           path: deploy
           ref: main
       - uses: actions/checkout@v4
         with:
           repository: envpilot/frontend
-          token: ${{ secrets.REPO_READ_TOKEN || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
           path: frontend
           ref: main
       - uses: actions/setup-go@v5
@@ -115,3 +142,56 @@ jobs:
           name: runner-image-metadata
           path: image-metadata.json
           if-no-files-found: error
+      - id: dispatch_auth
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        name: Select deploy dispatch authentication
+        env:
+          APP_ID: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_PAT }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]; then
+            echo "method=app" >> "$GITHUB_OUTPUT"
+          elif [[ -n "$FALLBACK_PAT" ]]; then
+            echo "method=pat" >> "$GITHUB_OUTPUT"
+            echo "::warning::Using fine-grained PAT fallback for deploy dispatch."
+          else
+            echo "No deploy-dispatch GitHub App credentials or fallback PAT is configured." >&2
+            exit 1
+          fi
+      - id: deploy_dispatch_app
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
+          private-key: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: deploy
+          permission-contents: write
+      - name: Dispatch immutable image update with GitHub App
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
+        env:
+          GH_TOKEN: ${{ steps.deploy_dispatch_app.outputs.token }}
+          METADATA: ${{ steps.published.outputs.metadata }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 3 --request POST \
+            --url "https://api.github.com/repos/${{ github.repository_owner }}/deploy/dispatches" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "$(jq -cn --argjson payload "$METADATA" '{event_type:"envpilot-image-published",client_payload:$payload + {source_revision:"${{ github.sha }}"}}')"
+      - name: Dispatch immutable image update with PAT fallback
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
+        env:
+          GH_TOKEN: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_PAT }}
+          METADATA: ${{ steps.published.outputs.metadata }}
+        run: |
+          set -euo pipefail
+          curl --fail-with-body --retry 3 --request POST \
+            --url "https://api.github.com/repos/${{ github.repository_owner }}/deploy/dispatches" \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            --data "$(jq -cn --argjson payload "$METADATA" '{event_type:"envpilot-image-published",client_payload:$payload + {source_revision:"${{ github.sha }}"}}')"
