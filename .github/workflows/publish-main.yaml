@@ -181,7 +181,7 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            --data "$(jq -cn --argjson payload "$METADATA" '{event_type:"envpilot-image-published",client_payload:$payload + {source_revision:"${{ github.sha }}"}}')"
+            --data "$(jq -cn --argjson payload "$METADATA" --arg source_repository "${{ github.repository }}" --arg source_revision "${{ github.sha }}" '{event_type:"envpilot-image-published",client_payload:$payload + {source_repository:$source_repository,source_revision:$source_revision}}')"
       - name: Dispatch immutable image update with PAT fallback
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
         env:
@@ -194,4 +194,4 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            --data "$(jq -cn --argjson payload "$METADATA" '{event_type:"envpilot-image-published",client_payload:$payload + {source_revision:"${{ github.sha }}"}}')"
+            --data "$(jq -cn --argjson payload "$METADATA" --arg source_repository "${{ github.repository }}" --arg source_revision "${{ github.sha }}" '{event_type:"envpilot-image-published",client_payload:$payload + {source_repository:$source_repository,source_revision:$source_revision}}')"
