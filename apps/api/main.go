@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/sha256"
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -54,6 +56,9 @@ func main() {
 			return
 		case "runner":
 			runRunner(logger)
+			return
+		case "runner-connectivity-check":
+			runRunnerConnectivityCheck(logger)
 			return
 		case "agent-install-check":
 			runAgentInstallCheck(logger)
@@ -438,6 +443,7 @@ func runAgentResourceScanTick(ctx context.Context, cfg agent.Config, reporter *a
 
 type runnerConfig struct {
 	ControlPlaneURL     string
+	ControlPlaneCAFile  string
 	ProjectID           string
 	ClusterID           string
 	RunnerID            string
@@ -471,6 +477,7 @@ func runnerConfigFromEnv() runnerConfig {
 	}
 	return runnerConfig{
 		ControlPlaneURL:     strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
+		ControlPlaneCAFile:  getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
 		ProjectID:           getenv("ENVPILOT_PROJECT_ID", ""),
 		ClusterID:           getenv("ENVPILOT_CLUSTER_ID", "default"),
 		RunnerID:            getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
@@ -491,6 +498,9 @@ func runnerConfigFromEnv() runnerConfig {
 func (c runnerConfig) validate() error {
 	if strings.TrimSpace(c.ControlPlaneURL) == "" {
 		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_URL is required")
+	}
+	if _, err := newRunnerControlPlaneHTTPClient(c.ReportTimeout, c.ControlPlaneCAFile); err != nil {
+		return fmt.Errorf("invalid control-plane TLS configuration: %w", err)
 	}
 	if strings.TrimSpace(c.ProjectID) == "" {
 		return fmt.Errorf("ENVPILOT_PROJECT_ID is required")
@@ -519,6 +529,62 @@ func (c runnerConfig) validate() error {
 	return nil
 }
 
+func newRunnerControlPlaneHTTPClient(timeout time.Duration, caFile string) (*http.Client, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if strings.TrimSpace(caFile) != "" {
+		pem, err := os.ReadFile(caFile)
+		if err != nil {
+			return nil, fmt.Errorf("read control-plane CA file: %w", err)
+		}
+		roots, err := x509.SystemCertPool()
+		if err != nil || roots == nil {
+			roots = x509.NewCertPool()
+		}
+		if !roots.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("control-plane CA file contains no certificates")
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+	}
+	return &http.Client{Timeout: timeout, Transport: transport}, nil
+}
+
+// runRunnerConnectivityCheck runs before installation from the Runner image
+// itself. It verifies only /api/v1/health and therefore never consumes a
+// one-time registration or project-config credential.
+func runRunnerConnectivityCheck(logger *slog.Logger) {
+	cfg := runnerConfigFromEnv()
+	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
+		logger.Error("runner control-plane connectivity check failed", "error", "ENVPILOT_CONTROL_PLANE_URL is required")
+		os.Exit(1)
+	}
+	client, err := newRunnerControlPlaneHTTPClient(cfg.ReportTimeout, cfg.ControlPlaneCAFile)
+	if err != nil {
+		logger.Error("runner control-plane connectivity check failed", "error", err)
+		os.Exit(1)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.ReportTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ControlPlaneURL, "/")+"/api/v1/health", nil)
+	if err != nil {
+		logger.Error("runner control-plane connectivity check failed", "error", err)
+		os.Exit(1)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		logger.Error("runner control-plane connectivity check failed", "error", fmt.Errorf("endpoint_unreachable: %w", err))
+		os.Exit(1)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		logger.Error("runner control-plane connectivity check failed", "error", fmt.Sprintf("endpoint_unhealthy: HTTP %d", resp.StatusCode))
+		os.Exit(1)
+	}
+	logger.Info("runner control-plane connectivity check completed", "control_plane_url", cfg.ControlPlaneURL)
+}
+
 func runRunner(logger *slog.Logger) {
 	cfg := runnerConfigFromEnv()
 	if err := cfg.validate(); err != nil {
@@ -532,8 +598,11 @@ func runRunner(logger *slog.Logger) {
 	runtimeState := newRunnerRuntimeState()
 	go serveRunnerHealth(ctx, cfg.HealthAddr, health, logger)
 
-	client := &http.Client{Timeout: cfg.ReportTimeout}
-	var err error
+	client, err := newRunnerControlPlaneHTTPClient(cfg.ReportTimeout, cfg.ControlPlaneCAFile)
+	if err != nil {
+		logger.Error("invalid control-plane TLS configuration", "error", err)
+		return
+	}
 	var registeredNow bool
 	cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 	if err != nil {
