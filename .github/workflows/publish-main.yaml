@@ -34,15 +34,15 @@ jobs:
       digest: ${{ steps.published.outputs.digest }}
       metadata: ${{ steps.published.outputs.metadata }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           path: runner
       - id: source_read_auth
         name: Select source checkout authentication
         env:
-          APP_ID: ${{ secrets.ENVPILOT_SOURCE_READ_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_SOURCE_READ_APP_PRIVATE_KEY }}
-          FALLBACK_PAT: ${{ secrets.ENVPILOT_SOURCE_READ_PAT }}
+          APP_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           if [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]; then
@@ -58,27 +58,27 @@ jobs:
         if: steps.source_read_auth.outputs.method == 'app'
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.ENVPILOT_SOURCE_READ_APP_ID }}
-          private-key: ${{ secrets.ENVPILOT_SOURCE_READ_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: bootstrap,deploy,frontend
           permission-contents: read
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: envpilot/bootstrap
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: bootstrap
           ref: main
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: envpilot/deploy
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: deploy
           ref: main
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: envpilot/frontend
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_SOURCE_READ_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: frontend
           ref: main
       - uses: actions/setup-go@v5
@@ -146,9 +146,9 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         name: Select deploy dispatch authentication
         env:
-          APP_ID: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_PRIVATE_KEY }}
-          FALLBACK_PAT: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_PAT }}
+          APP_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           if [[ -n "$APP_ID" && -n "$APP_PRIVATE_KEY" ]]; then
@@ -164,8 +164,8 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         uses: actions/create-github-app-token@v1
         with:
-          app-id: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_ID }}
-          private-key: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_APP_PRIVATE_KEY }}
+          app-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_ID }}
+          private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: deploy
           permission-contents: write
@@ -185,7 +185,7 @@ jobs:
       - name: Dispatch immutable image update with PAT fallback
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
         env:
-          GH_TOKEN: ${{ secrets.ENVPILOT_DEPLOY_DISPATCH_PAT }}
+          GH_TOKEN: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
           METADATA: ${{ steps.published.outputs.metadata }}
         run: |
           set -euo pipefail
