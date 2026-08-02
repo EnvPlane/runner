@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
@@ -1003,7 +1003,7 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	case "validate_helm_chart":
 		result.Namespace = ""
 		result.ReleaseName = ""
-		if err := validateRunnerHelmChart(ctx, command.ChartRef); err != nil {
+		if err := validateRunnerHelmChart(ctx, command.ChartRef, command.ChartVersion); err != nil {
 			result.ErrorCode, result.Error = classifyHelmChartPreflightError(err)
 			return result
 		}
@@ -1035,18 +1035,22 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	return result
 }
 
-func validateRunnerHelmChart(ctx context.Context, chartRef string) error {
-	return validateRunnerHelmChartWithCommand(ctx, chartRef, func(ctx context.Context, args ...string) ([]byte, error) {
+func validateRunnerHelmChart(ctx context.Context, chartRef, chartVersion string) error {
+	return validateRunnerHelmChartWithCommand(ctx, chartRef, chartVersion, func(ctx context.Context, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, "helm", args...).CombinedOutput()
 	})
 }
 
-func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef string, run func(context.Context, ...string) ([]byte, error)) error {
+func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef, chartVersion string, run func(context.Context, ...string) ([]byte, error)) error {
 	chartRef = strings.TrimSpace(chartRef)
 	if !validRunnerHelmChartRef(chartRef) {
 		return fmt.Errorf("invalid chart reference")
 	}
-	output, err := run(ctx, "show", "chart", chartRef)
+	args := []string{"show", "chart", chartRef}
+	if strings.TrimSpace(chartVersion) != "" {
+		args = append(args, "--version", strings.TrimSpace(chartVersion))
+	}
+	output, err := run(ctx, args...)
 	if err == nil {
 		return nil
 	}

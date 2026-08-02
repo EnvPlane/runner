@@ -277,6 +277,7 @@ type RunnerCommand struct {
 	RunnerID      string        `json:"runnerId"`
 	Operation     string        `json:"operation"`
 	ChartRef      string        `json:"chartRef,omitempty"`
+	ChartVersion  string        `json:"chartVersion,omitempty"`
 	Environment   Environment   `json:"environment"`
 	ProjectConfig ProjectConfig `json:"projectConfig"`
 	Status        string        `json:"status"`
