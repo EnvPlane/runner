@@ -18,11 +18,32 @@ import (
 
 	"envpilot/agent"
 	"envpilot/internal/domain"
+	"envpilot/internal/orchestrator"
 )
 
 type fakeCapabilitySource struct {
 	capabilities agent.ClusterCapabilities
 	err          error
+}
+
+type fakeRunnerCommandBackend struct {
+	status domain.EnvironmentStatus
+}
+
+func (b fakeRunnerCommandBackend) Render(context.Context, domain.Environment, domain.ProjectConfig) ([]orchestrator.Manifest, error) {
+	return nil, nil
+}
+func (b fakeRunnerCommandBackend) Apply(context.Context, domain.Environment, domain.ProjectConfig) error {
+	return nil
+}
+func (b fakeRunnerCommandBackend) Delete(context.Context, domain.Environment, domain.ProjectConfig) error {
+	return nil
+}
+func (b fakeRunnerCommandBackend) Status(context.Context, domain.Environment, domain.ProjectConfig) (domain.EnvironmentStatus, error) {
+	return b.status, nil
+}
+func (b fakeRunnerCommandBackend) DeploymentTarget(environment domain.Environment, _ domain.ProjectConfig) (string, string, error) {
+	return environment.ID, environment.Namespace, nil
 }
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -326,6 +347,16 @@ func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	helmDirect, ok := deployment["helmDirect"].(map[string]any)
 	if !ok || helmDirect["chartRef"] != "oci://registry.example.com/charts/orders" || helmDirect["chartVersion"] != "2.8.1" {
 		t.Fatalf("runner command lost chart contract: %#v", deployment)
+	}
+}
+
+func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
+	result := executeRunnerCommandWithBackend(context.Background(), domain.RunnerCommand{
+		ID: "status-target-cluster", Operation: "status",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envpilot-pr-42"},
+	}, fakeRunnerCommandBackend{status: domain.StatusReady})
+	if result.Status != "succeeded" || result.EnvironmentStatus != string(domain.StatusReady) {
+		t.Fatalf("status result = %#v", result)
 	}
 }
 

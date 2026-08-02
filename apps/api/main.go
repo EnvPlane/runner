@@ -1057,8 +1057,16 @@ func validateRunnerCommandAPIResponse(resp *http.Response) error {
 }
 
 func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) domain.RunnerCommandResult {
+	return executeRunnerCommandWithBackend(ctx, command, orchestrator.NewHelmDirectBackend(nil))
+}
+
+type runnerCommandBackend interface {
+	orchestrator.DeploymentBackend
+	DeploymentTarget(domain.Environment, domain.ProjectConfig) (string, string, error)
+}
+
+func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
-	backend := orchestrator.NewHelmDirectBackend(nil)
 	projectConfig := projectConfigForRunnerCommand(command)
 	var err error
 	switch command.Operation {
@@ -1085,6 +1093,17 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 			return result
 		}
 		err = backend.Delete(ctx, command.Environment, projectConfig)
+	case "status":
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		var status domain.EnvironmentStatus
+		status, err = backend.Status(ctx, command.Environment, projectConfig)
+		if err == nil {
+			result.EnvironmentStatus = string(status)
+		}
 	default:
 		result.Error = "unsupported runner command operation"
 		return result

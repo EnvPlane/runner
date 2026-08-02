@@ -286,16 +286,17 @@ type RunnerCommand struct {
 }
 
 type RunnerCommandResult struct {
-	ProjectID       string `json:"projectId"`
-	ClusterID       string `json:"clusterId"`
-	RunnerID        string `json:"runnerId"`
-	RunnerAuthToken string `json:"runnerAuthToken"`
-	CommandID       string `json:"commandId"`
-	Status          string `json:"status"`
-	ReleaseName     string `json:"releaseName,omitempty"`
-	Namespace       string `json:"namespace,omitempty"`
-	Error           string `json:"error,omitempty"`
-	ErrorCode       string `json:"errorCode,omitempty"`
+	ProjectID         string `json:"projectId"`
+	ClusterID         string `json:"clusterId"`
+	RunnerID          string `json:"runnerId"`
+	RunnerAuthToken   string `json:"runnerAuthToken"`
+	CommandID         string `json:"commandId"`
+	Status            string `json:"status"`
+	ReleaseName       string `json:"releaseName,omitempty"`
+	Namespace         string `json:"namespace,omitempty"`
+	Error             string `json:"error,omitempty"`
+	ErrorCode         string `json:"errorCode,omitempty"`
+	EnvironmentStatus string `json:"environmentStatus,omitempty"`
 }
 
 type RunnerHeartbeatStatus string
