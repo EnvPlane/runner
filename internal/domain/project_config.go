@@ -25,6 +25,7 @@ type ProjectHelmDirectConfig struct {
 	NamespacePattern       string `json:"namespacePattern"`
 	ReleaseNamePattern     string `json:"releaseNamePattern"`
 	ChartRef               string `json:"chartRef"`
+	ChartVersion           string `json:"chartVersion,omitempty"`
 	Timeout                int    `json:"timeout"`
 	Wait                   bool   `json:"wait"`
 	CreateNamespace        bool   `json:"createNamespace"`

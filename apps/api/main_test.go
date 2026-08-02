@@ -297,6 +297,38 @@ func TestValidateRunnerHelmChartPassesPinnedVersion(t *testing.T) {
 	}
 }
 
+func TestValidateRunnerHelmChartOmitsVersionForDirectArchive(t *testing.T) {
+	var got []string
+	err := validateRunnerHelmChartWithCommand(context.Background(), "https://charts.example.test/orders-2.8.1.tgz", "2.8.1", func(_ context.Context, args ...string) ([]byte, error) {
+		got = args
+		return []byte("apiVersion: v2\nname: orders\n"), nil
+	})
+	if err != nil {
+		t.Fatalf("validate chart: %v", err)
+	}
+	if strings.Join(got, " ") != "show chart https://charts.example.test/orders-2.8.1.tgz" {
+		t.Fatalf("direct archive must not receive --version, arguments = %q", got)
+	}
+}
+
+func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
+	config := projectConfigForRunnerCommand(domain.RunnerCommand{
+		ChartRef:     "oci://registry.example.com/charts/orders",
+		ChartVersion: "2.8.1",
+		ProjectConfig: domain.ProjectConfig{Config: map[string]any{
+			"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{"wait": true}},
+		}},
+	})
+	deployment, ok := config.Config["deployment"].(map[string]any)
+	if !ok {
+		t.Fatalf("deployment config = %#v", config.Config)
+	}
+	helmDirect, ok := deployment["helmDirect"].(map[string]any)
+	if !ok || helmDirect["chartRef"] != "oci://registry.example.com/charts/orders" || helmDirect["chartVersion"] != "2.8.1" {
+		t.Fatalf("runner command lost chart contract: %#v", deployment)
+	}
+}
+
 func TestValidateRunnerHelmChartRejectsLegacyLocalPathWithoutExecutingHelm(t *testing.T) {
 	called := false
 	err := validateRunnerHelmChartWithCommand(context.Background(), "deploy/helm/{{ .project.id }}", "", func(_ context.Context, _ ...string) ([]byte, error) {

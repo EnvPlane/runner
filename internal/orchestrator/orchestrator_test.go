@@ -623,6 +623,46 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendApplyUsesCompiledChartVersion(t *testing.T) {
+	executor := &fakeHelmExecutor{}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{ID: "pr-versioned", Project: "orders", Namespace: "envpilot-pr-versioned", Charts: domain.ChartVersions{App: "fallback-chart"}}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+			"chartRef": "oci://registry.example.com/charts/orders", "chartVersion": "2.8.1",
+		}},
+	}}
+	if err := backend.Apply(context.Background(), environment, projectConfig); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("expected one helm call, got %d", len(executor.calls))
+	}
+	if got := executor.calls[0].Options.ChartRef; got != "oci://registry.example.com/charts/orders" {
+		t.Fatalf("chart ref = %q", got)
+	}
+	if got := executor.calls[0].Options.ChartVersion; got != "2.8.1" {
+		t.Fatalf("chart version = %q", got)
+	}
+}
+
+func TestHelmDirectBackendApplyOmitsVersionForDirectArchive(t *testing.T) {
+	executor := &fakeHelmExecutor{}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{ID: "pr-archive", Project: "orders", Namespace: "envpilot-pr-archive"}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+			"chartRef": "https://charts.example.test/orders-2.8.1.tgz", "chartVersion": "2.8.1",
+		}},
+	}}
+	if err := backend.Apply(context.Background(), environment, projectConfig); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(executor.calls) != 1 || executor.calls[0].Options.ChartVersion != "" {
+		t.Fatalf("direct archive must omit --version: %#v", executor.calls)
+	}
+}
+
 func TestHelmDirectBackendApplyHonorsCreateNamespaceFalse(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)
@@ -632,7 +672,7 @@ func TestHelmDirectBackendApplyHonorsCreateNamespaceFalse(t *testing.T) {
 	}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
 		"deployment": map[string]any{
-			"backend": "helm_direct",
+			"backend":    "helm_direct",
 			"helmDirect": map[string]any{"createNamespace": false},
 		},
 	}}
@@ -934,6 +974,7 @@ func TestCLIHelmExecutorBuildsUpgradeInstallCommand(t *testing.T) {
 	err := executor.UpgradeInstall(context.Background(), HelmUpgradeOptions{
 		ReleaseName:     "test-release",
 		ChartRef:        "charts/test",
+		ChartVersion:    "1.2.3",
 		Namespace:       "feature-ns",
 		ValuesFile:      "values.yaml",
 		CreateNamespace: true,
@@ -950,7 +991,7 @@ func TestCLIHelmExecutorBuildsUpgradeInstallCommand(t *testing.T) {
 	for _, arg := range capturedArgs {
 		requireArg[arg] = true
 	}
-	for _, required := range []string{"upgrade", "--install", "test-release", "charts/test", "--namespace", "feature-ns", "--create-namespace", "-f", "values.yaml", "--wait", "--timeout", "45s"} {
+	for _, required := range []string{"upgrade", "--install", "test-release", "charts/test", "--namespace", "feature-ns", "--create-namespace", "-f", "values.yaml", "--version", "1.2.3", "--wait", "--timeout", "45s"} {
 		if !requireArg[required] {
 			t.Fatalf("missing arg %q in %v", required, capturedArgs)
 		}

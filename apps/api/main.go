@@ -1059,6 +1059,7 @@ func validateRunnerCommandAPIResponse(resp *http.Response) error {
 func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
 	backend := orchestrator.NewHelmDirectBackend(nil)
+	projectConfig := projectConfigForRunnerCommand(command)
 	var err error
 	switch command.Operation {
 	case "validate_helm_chart":
@@ -1071,19 +1072,19 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 		result.Status = "succeeded"
 		return result
 	case "create", "recreate":
-		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, command.ProjectConfig)
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
 			return result
 		}
-		err = backend.Apply(ctx, command.Environment, command.ProjectConfig)
+		err = backend.Apply(ctx, command.Environment, projectConfig)
 	case "delete":
-		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, command.ProjectConfig)
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
 			return result
 		}
-		err = backend.Delete(ctx, command.Environment, command.ProjectConfig)
+		err = backend.Delete(ctx, command.Environment, projectConfig)
 	default:
 		result.Error = "unsupported runner command operation"
 		return result
@@ -1094,6 +1095,42 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	}
 	result.Status = "succeeded"
 	return result
+}
+
+// projectConfigForRunnerCommand keeps command fields and the compiled project
+// configuration coherent while accepting commands from a control plane that
+// sends the Helm Direct contract in either representation. It only mutates a
+// private copy, never the decoded command object.
+func projectConfigForRunnerCommand(command domain.RunnerCommand) domain.ProjectConfig {
+	projectConfig := command.ProjectConfig
+	if strings.TrimSpace(command.ChartRef) == "" && strings.TrimSpace(command.ChartVersion) == "" {
+		return projectConfig
+	}
+	config := make(map[string]any, len(projectConfig.Config)+1)
+	for key, value := range projectConfig.Config {
+		config[key] = value
+	}
+	deployment, _ := config["deployment"].(map[string]any)
+	deploymentCopy := make(map[string]any, len(deployment)+2)
+	for key, value := range deployment {
+		deploymentCopy[key] = value
+	}
+	deploymentCopy["backend"] = "helm_direct"
+	helmDirect, _ := deploymentCopy["helmDirect"].(map[string]any)
+	helmDirectCopy := make(map[string]any, len(helmDirect)+2)
+	for key, value := range helmDirect {
+		helmDirectCopy[key] = value
+	}
+	if value := strings.TrimSpace(command.ChartRef); value != "" {
+		helmDirectCopy["chartRef"] = value
+	}
+	if value := strings.TrimSpace(command.ChartVersion); value != "" {
+		helmDirectCopy["chartVersion"] = value
+	}
+	deploymentCopy["helmDirect"] = helmDirectCopy
+	config["deployment"] = deploymentCopy
+	projectConfig.Config = config
+	return projectConfig
 }
 
 func validateRunnerHelmChart(ctx context.Context, chartRef, chartVersion string) error {
@@ -1108,7 +1145,7 @@ func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef, chartVers
 		return fmt.Errorf("invalid chart reference")
 	}
 	args := []string{"show", "chart", chartRef}
-	if strings.TrimSpace(chartVersion) != "" {
+	if strings.TrimSpace(chartVersion) != "" && !isDirectRunnerHelmChartArchive(chartRef) {
 		args = append(args, "--version", strings.TrimSpace(chartVersion))
 	}
 	output, err := run(ctx, args...)
@@ -1116,6 +1153,14 @@ func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef, chartVers
 		return nil
 	}
 	return fmt.Errorf("%s", strings.TrimSpace(string(output)))
+}
+
+func isDirectRunnerHelmChartArchive(chartRef string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(chartRef))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(parsed.Path), ".tgz")
 }
 
 func validRunnerHelmChartRef(chartRef string) bool {

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"os/exec"
 	"sort"
@@ -49,6 +50,7 @@ type deploymentBackendWithWriter interface {
 type HelmUpgradeOptions struct {
 	ReleaseName     string
 	ChartRef        string
+	ChartVersion    string
 	Namespace       string
 	ValuesFile      string
 	CreateNamespace bool
@@ -133,6 +135,9 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 	}
 	if strings.TrimSpace(options.ValuesFile) != "" {
 		args = append(args, "-f", options.ValuesFile)
+	}
+	if strings.TrimSpace(options.ChartVersion) != "" && !isDirectHelmChartArchive(options.ChartRef) {
+		args = append(args, "--version", strings.TrimSpace(options.ChartVersion))
 	}
 	if options.Wait {
 		args = append(args, "--wait")
@@ -427,14 +432,15 @@ type helmDirectValue struct {
 }
 
 type helmDirectRelease struct {
-	Name        string            `yaml:"name"`
-	Namespace   string            `yaml:"namespace"`
-	ChartPath   string            `yaml:"chartPath"`
-	ChartRef    string            `yaml:"chartRef"`
-	Timeout     int               `yaml:"timeout"`
-	Wait        bool              `yaml:"wait"`
-	Labels      []helmDirectValue `yaml:"labels"`
-	Annotations []helmDirectValue `yaml:"annotations"`
+	Name         string            `yaml:"name"`
+	Namespace    string            `yaml:"namespace"`
+	ChartPath    string            `yaml:"chartPath"`
+	ChartRef     string            `yaml:"chartRef"`
+	ChartVersion string            `yaml:"chartVersion,omitempty"`
+	Timeout      int               `yaml:"timeout"`
+	Wait         bool              `yaml:"wait"`
+	Labels       []helmDirectValue `yaml:"labels"`
+	Annotations  []helmDirectValue `yaml:"annotations"`
 }
 
 type helmDirectValues struct {
@@ -498,7 +504,8 @@ func (b *HelmDirectBackend) Apply(ctx context.Context, environment domain.Enviro
 	}()
 	return b.helmExecutor.UpgradeInstall(ctx, HelmUpgradeOptions{
 		ReleaseName:     releaseName,
-		ChartRef:        b.chartRef(environment),
+		ChartRef:        b.chartRef(environment, config),
+		ChartVersion:    helmDirectChartVersion(config.chartRef, config.chartVersion),
 		Namespace:       namespace,
 		ValuesFile:      valuesFile,
 		CreateNamespace: config.createNamespace,
@@ -586,13 +593,14 @@ func (b *HelmDirectBackend) renderHelmDirectManifest(environment domain.Environm
 			ValuesObj  []helmDirectValue   `yaml:"valuesObject,omitempty"`
 		}{
 			Release: helmDirectRelease{
-				Name:      releaseName,
-				Namespace: releaseNamespace,
-				ChartPath: b.chartPath(environment),
-				ChartRef:  b.chartRef(environment),
-				Timeout:   config.timeout,
-				Wait:      config.wait,
-				Labels:    labels,
+				Name:         releaseName,
+				Namespace:    releaseNamespace,
+				ChartPath:    b.chartPath(environment),
+				ChartRef:     b.chartRef(environment, config),
+				ChartVersion: config.chartVersion,
+				Timeout:      config.timeout,
+				Wait:         config.wait,
+				Labels:       labels,
 				Annotations: func() []helmDirectValue {
 					c := make([]helmDirectValue, len(labels))
 					copy(c, labels)
@@ -643,7 +651,10 @@ func (b *HelmDirectBackend) chartPath(environment domain.Environment) string {
 	return strings.TrimSpace(environment.GitOps.Path)
 }
 
-func (b *HelmDirectBackend) chartRef(environment domain.Environment) string {
+func (b *HelmDirectBackend) chartRef(environment domain.Environment, config helmDirectConfig) string {
+	if ref := strings.TrimSpace(config.chartRef); ref != "" {
+		return ref
+	}
 	ref := strings.TrimSpace(environment.Charts.App)
 	if ref != "" {
 		return ref
@@ -768,6 +779,8 @@ func (b *HelmDirectBackend) renderHelmImageValues(environment domain.Environment
 type helmDirectConfig struct {
 	namespaceMode      string
 	releaseNamePattern string
+	chartRef           string
+	chartVersion       string
 	timeout            int
 	wait               bool
 	createNamespace    bool
@@ -805,6 +818,8 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 	if value := asString(helmDirectConfigValue["releaseNamePattern"]); strings.TrimSpace(value) != "" {
 		config.releaseNamePattern = strings.TrimSpace(value)
 	}
+	config.chartRef = strings.TrimSpace(asString(helmDirectConfigValue["chartRef"]))
+	config.chartVersion = strings.TrimSpace(asString(helmDirectConfigValue["chartVersion"]))
 	if value, ok := helmDirectConfigValue["timeout"]; ok {
 		if timeout, ok := asInt(value); ok && timeout > 0 {
 			config.timeout = timeout
@@ -817,6 +832,26 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 		config.createNamespace = asBool(value)
 	}
 	return config
+}
+
+// Helm accepts --version for chart repositories and OCI references, but a
+// direct .tgz archive already identifies its exact chart artifact and rejects
+// that flag. Keep the configured version in the contract while omitting it at
+// execution time for this narrow exception.
+func helmDirectChartVersion(chartRef, chartVersion string) string {
+	chartVersion = strings.TrimSpace(chartVersion)
+	if chartVersion == "" || isDirectHelmChartArchive(chartRef) {
+		return ""
+	}
+	return chartVersion
+}
+
+func isDirectHelmChartArchive(chartRef string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(chartRef))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return false
+	}
+	return strings.HasSuffix(strings.ToLower(parsed.Path), ".tgz")
 }
 
 func normalizeHelmServiceTag(name string) string {
