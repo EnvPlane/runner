@@ -652,6 +652,10 @@ func runRunner(logger *slog.Logger) {
 		}
 	}
 	if err := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusOnline), ""); err != nil {
+		if isRunnerFixtureIdentityReissuedError(err) {
+			prepareRunnerFixtureRecovery(cfg, logger)
+			return
+		}
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
 			<-ctx.Done()
@@ -664,7 +668,7 @@ func runRunner(logger *slog.Logger) {
 	health.set(true)
 	logger.Info("envpilot runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
 	go runRunnerCommands(ctx, cfg, client, runtimeState, health, logger)
-	runRunnerHeartbeat(ctx, cfg, client, runtimeState, health, logger)
+	runRunnerHeartbeat(ctx, cfg, client, runtimeState, health, logger, stop)
 }
 
 type runnerHealth struct {
@@ -817,7 +821,7 @@ func fetchRunnerProjectConfig(ctx context.Context, cfg runnerConfig, client *htt
 	return nil
 }
 
-func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
+func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger, stop context.CancelFunc) {
 	ticker := time.NewTicker(cfg.HeartbeatInterval)
 	defer ticker.Stop()
 	for {
@@ -831,6 +835,11 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 			}
 			status, statusError := state.heartbeat()
 			if err := reportRunnerHeartbeat(ctx, cfg, client, status, statusError); err != nil {
+				if isRunnerFixtureIdentityReissuedError(err) {
+					prepareRunnerFixtureRecovery(cfg, logger)
+					stop()
+					return
+				}
 				if isRunnerStaleBootstrapIdentityError(err) {
 					markRunnerStaleBootstrapIdentity(state, health, logger, err)
 					<-ctx.Done()
@@ -847,6 +856,19 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 			}
 		}
 	}
+}
+
+// prepareRunnerFixtureRecovery is used only after the server explicitly
+// reports fixture_identity_reissued. It clears the disposable persisted auth
+// credential; the Deployment restart policy then starts the same release and
+// registers again from its mounted bootstrap Secret. It never touches or logs
+// the raw bootstrap credential.
+func prepareRunnerFixtureRecovery(cfg runnerConfig, logger *slog.Logger) {
+	if err := clearRuntimeToken(cfg.RunnerAuthTokenFile); err != nil {
+		logger.Error("clear stale runner auth token", "error", err)
+		return
+	}
+	logger.Warn("runner fixture identity reissued; restarting automatically for registration", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
 }
 
 func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
@@ -966,6 +988,14 @@ func isRunnerStaleBootstrapIdentityError(err error) bool {
 		return apiError.code == "bootstrap_session_not_found" || apiError.code == "stale_runner_bootstrap_identity"
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "bootstrap session not found")
+}
+
+func isRunnerFixtureIdentityReissuedError(err error) bool {
+	var apiError runnerAPIError
+	if errors.As(err, &apiError) && apiError.code == "fixture_identity_reissued" {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "fixture_identity_reissued")
 }
 
 func isRunnerCommandTransportError(err error) bool {
@@ -1247,6 +1277,17 @@ func persistRuntimeToken(path string, token string) error {
 		return err
 	}
 	return os.WriteFile(path, []byte(token+"\n"), 0o600)
+}
+
+func clearRuntimeToken(path string) error {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return os.WriteFile(path, nil, 0o600)
 }
 
 func registrationTokenFingerprintPath(authTokenPath string) string {

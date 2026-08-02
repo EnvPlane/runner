@@ -116,6 +116,34 @@ func TestRunnerPostJSONClassifiesMissingBootstrapSessionForRecovery(t *testing.T
 	}
 }
 
+func TestRunnerPostJSONClassifiesFixtureIdentityReissueForAutomaticRecovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"fixture runner identity was reissued; retry registration","code":"fixture_identity_reissued"}`)),
+			Request:    request,
+		}, nil
+	})}
+	err := reportRunnerHeartbeat(context.Background(), runnerConfig{
+		ControlPlaneURL: "http://runner.test", ProjectID: "fixture", ClusterID: "remote", RunnerID: "fixture-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
+	}, client, string(domain.RunnerHeartbeatStatusOnline), "")
+	if err == nil || !isRunnerFixtureIdentityReissuedError(err) {
+		t.Fatalf("heartbeat error = %v, want fixture identity reissued", err)
+	}
+}
+
+func TestPrepareRunnerFixtureRecoveryClearsOnlyPersistedRuntimeAuth(t *testing.T) {
+	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
+	if err := persistRuntimeToken(authPath, "runtime-auth"); err != nil {
+		t.Fatalf("persist runtime auth: %v", err)
+	}
+	prepareRunnerFixtureRecovery(runnerConfig{ProjectID: "fixture", RunnerID: "fixture-runner", RunnerAuthTokenFile: authPath}, slog.Default())
+	if got := readRuntimeTokenFile(authPath); got != "" {
+		t.Fatalf("persisted runtime auth after recovery = %q, want empty", got)
+	}
+}
+
 func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
 	if err := persistRuntimeToken(authPath, "old-runner-auth"); err != nil {
