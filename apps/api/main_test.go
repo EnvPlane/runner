@@ -58,6 +58,24 @@ func TestNextRunnerCommandClassifiesEndpointAndAuthenticationFailures(t *testing
 	}
 }
 
+func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
+	cfg := runnerConfig{
+		ControlPlaneURL:          "http://host.minikube.internal:18080",
+		ControlPlaneEndpointMode: "remote",
+		ProjectID:                "checkout",
+		ClusterID:                "remote-cluster",
+		RunnerID:                 "checkout-runner",
+		RunnerNamespace:          "envpilot",
+		DeploymentMode:           "helm",
+		RunnerAuthToken:          "runner-auth-token",
+		HeartbeatInterval:        time.Second,
+		ReportTimeout:            time.Second,
+	}
+	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "target-pod-reachable") {
+		t.Fatalf("remote host-local endpoint error=%v", err)
+	}
+}
+
 func TestNextRunnerCommandRequiresCompatibilityResponseHeader(t *testing.T) {
 	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

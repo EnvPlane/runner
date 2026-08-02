@@ -442,22 +442,23 @@ func runAgentResourceScanTick(ctx context.Context, cfg agent.Config, reporter *a
 }
 
 type runnerConfig struct {
-	ControlPlaneURL     string
-	ControlPlaneCAFile  string
-	ProjectID           string
-	ClusterID           string
-	RunnerID            string
-	RunnerNamespace     string
-	DeploymentMode      string
-	RegistrationToken   string
-	RunnerAuthToken     string
-	RunnerAuthTokenFile string
-	ProjectConfigURL    string
-	ProjectConfigToken  string
-	HeartbeatInterval   time.Duration
-	ReportTimeout       time.Duration
-	HealthAddr          string
-	RunnerVersion       string
+	ControlPlaneURL          string
+	ControlPlaneEndpointMode string
+	ControlPlaneCAFile       string
+	ProjectID                string
+	ClusterID                string
+	RunnerID                 string
+	RunnerNamespace          string
+	DeploymentMode           string
+	RegistrationToken        string
+	RunnerAuthToken          string
+	RunnerAuthTokenFile      string
+	ProjectConfigURL         string
+	ProjectConfigToken       string
+	HeartbeatInterval        time.Duration
+	ReportTimeout            time.Duration
+	HealthAddr               string
+	RunnerVersion            string
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -476,28 +477,32 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	return runnerConfig{
-		ControlPlaneURL:     strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
-		ControlPlaneCAFile:  getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
-		ProjectID:           getenv("ENVPILOT_PROJECT_ID", ""),
-		ClusterID:           getenv("ENVPILOT_CLUSTER_ID", "default"),
-		RunnerID:            getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
-		RunnerNamespace:     getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
-		DeploymentMode:      strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
-		RegistrationToken:   registrationToken,
-		RunnerAuthToken:     authToken,
-		RunnerAuthTokenFile: authTokenFile,
-		ProjectConfigURL:    getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
-		ProjectConfigToken:  getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
-		HeartbeatInterval:   time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
-		ReportTimeout:       time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
-		HealthAddr:          getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
-		RunnerVersion:       getenv("ENVPILOT_RUNNER_VERSION", "dev"),
+		ControlPlaneURL:          strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
+		ControlPlaneEndpointMode: strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
+		ControlPlaneCAFile:       getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
+		ProjectID:                getenv("ENVPILOT_PROJECT_ID", ""),
+		ClusterID:                getenv("ENVPILOT_CLUSTER_ID", "default"),
+		RunnerID:                 getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
+		RunnerNamespace:          getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
+		DeploymentMode:           strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
+		RegistrationToken:        registrationToken,
+		RunnerAuthToken:          authToken,
+		RunnerAuthTokenFile:      authTokenFile,
+		ProjectConfigURL:         getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
+		ProjectConfigToken:       getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
+		HeartbeatInterval:        time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
+		ReportTimeout:            time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
+		HealthAddr:               getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
+		RunnerVersion:            getenv("ENVPILOT_RUNNER_VERSION", "dev"),
 	}
 }
 
 func (c runnerConfig) validate() error {
 	if strings.TrimSpace(c.ControlPlaneURL) == "" {
 		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_URL is required")
+	}
+	if err := validateRunnerControlPlaneEndpoint(c.ControlPlaneURL, c.ControlPlaneEndpointMode); err != nil {
+		return err
 	}
 	if _, err := newRunnerControlPlaneHTTPClient(c.ReportTimeout, c.ControlPlaneCAFile); err != nil {
 		return fmt.Errorf("invalid control-plane TLS configuration: %w", err)
@@ -525,6 +530,28 @@ func (c runnerConfig) validate() error {
 	}
 	if c.ReportTimeout <= 0 {
 		return fmt.Errorf("report timeout must be positive")
+	}
+	return nil
+}
+
+func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
+	mode := strings.ToLower(strings.TrimSpace(endpointMode))
+	if mode == "" {
+		mode = "samecluster"
+	}
+	if mode != "samecluster" && mode != "remote" {
+		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE must be sameCluster or remote")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
+		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_URL must be an HTTP(S) URL")
+	}
+	if mode != "remote" {
+		return nil
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "envpilot.local" || host == "host.minikube.internal" || strings.HasSuffix(host, ".svc") || strings.Contains(host, ".svc.") {
+		return fmt.Errorf("remote ENVPILOT_CONTROL_PLANE_URL must be target-pod-reachable, not host-local or Kubernetes Service DNS")
 	}
 	return nil
 }
@@ -558,6 +585,10 @@ func runRunnerConnectivityCheck(logger *slog.Logger) {
 	cfg := runnerConfigFromEnv()
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
 		logger.Error("runner control-plane connectivity check failed", "error", "ENVPILOT_CONTROL_PLANE_URL is required")
+		os.Exit(1)
+	}
+	if err := validateRunnerControlPlaneEndpoint(cfg.ControlPlaneURL, cfg.ControlPlaneEndpointMode); err != nil {
+		logger.Error("runner control-plane connectivity check failed", "error", err)
 		os.Exit(1)
 	}
 	client, err := newRunnerControlPlaneHTTPClient(cfg.ReportTimeout, cfg.ControlPlaneCAFile)
