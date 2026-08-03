@@ -442,23 +442,25 @@ func runAgentResourceScanTick(ctx context.Context, cfg agent.Config, reporter *a
 }
 
 type runnerConfig struct {
-	ControlPlaneURL          string
-	ControlPlaneEndpointMode string
-	ControlPlaneCAFile       string
-	ProjectID                string
-	ClusterID                string
-	RunnerID                 string
-	RunnerNamespace          string
-	DeploymentMode           string
-	RegistrationToken        string
-	RunnerAuthToken          string
-	RunnerAuthTokenFile      string
-	ProjectConfigURL         string
-	ProjectConfigToken       string
-	HeartbeatInterval        time.Duration
-	ReportTimeout            time.Duration
-	HealthAddr               string
-	RunnerVersion            string
+	ControlPlaneURL            string
+	ControlPlaneEndpointMode   string
+	ControlPlaneCAFile         string
+	ProjectID                  string
+	ClusterID                  string
+	RunnerID                   string
+	RunnerNamespace            string
+	DeploymentMode             string
+	RegistrationToken          string
+	RunnerAuthToken            string
+	RunnerAuthTokenFile        string
+	ProjectConfigURL           string
+	ProjectConfigToken         string
+	HeartbeatInterval          time.Duration
+	ReportTimeout              time.Duration
+	HealthAddr                 string
+	RunnerVersion              string
+	FeatureEnvWriterMode       string
+	FeatureEnvWriterNamespaces []string
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -477,24 +479,70 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	return runnerConfig{
-		ControlPlaneURL:          strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
-		ControlPlaneEndpointMode: strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
-		ControlPlaneCAFile:       getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
-		ProjectID:                getenv("ENVPILOT_PROJECT_ID", ""),
-		ClusterID:                getenv("ENVPILOT_CLUSTER_ID", "default"),
-		RunnerID:                 getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
-		RunnerNamespace:          getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
-		DeploymentMode:           strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
-		RegistrationToken:        registrationToken,
-		RunnerAuthToken:          authToken,
-		RunnerAuthTokenFile:      authTokenFile,
-		ProjectConfigURL:         getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
-		ProjectConfigToken:       getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
-		HeartbeatInterval:        time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
-		ReportTimeout:            time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
-		HealthAddr:               getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
-		RunnerVersion:            getenv("ENVPILOT_RUNNER_VERSION", "dev"),
+		ControlPlaneURL:            strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
+		ControlPlaneEndpointMode:   strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
+		ControlPlaneCAFile:         getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
+		ProjectID:                  getenv("ENVPILOT_PROJECT_ID", ""),
+		ClusterID:                  getenv("ENVPILOT_CLUSTER_ID", "default"),
+		RunnerID:                   getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
+		RunnerNamespace:            getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
+		DeploymentMode:             strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
+		RegistrationToken:          registrationToken,
+		RunnerAuthToken:            authToken,
+		RunnerAuthTokenFile:        authTokenFile,
+		ProjectConfigURL:           getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
+		ProjectConfigToken:         getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
+		HeartbeatInterval:          time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
+		ReportTimeout:              time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
+		HealthAddr:                 getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
+		RunnerVersion:              getenv("ENVPILOT_RUNNER_VERSION", "dev"),
+		FeatureEnvWriterMode:       strings.TrimSpace(getenv("ENVPILOT_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
+		FeatureEnvWriterNamespaces: normalizeRunnerNamespaceList(getenv("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES", "")),
 	}
+}
+
+func normalizeRunnerNamespaceList(raw string) []string {
+	seen := map[string]struct{}{}
+	items := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		namespace := strings.TrimSpace(value)
+		if namespace == "" {
+			continue
+		}
+		if _, exists := seen[namespace]; exists {
+			continue
+		}
+		seen[namespace] = struct{}{}
+		items = append(items, namespace)
+	}
+	return items
+}
+
+// helmTargetNamespaces is deliberately finite. Kubernetes RBAC cannot safely
+// express a wildcard namespace RoleBinding, so dynamic namespaces are never
+// claimed as writable until the Runner chart has rendered a Role/RoleBinding
+// for the exact namespace.
+func (c runnerConfig) helmTargetNamespaces() []string {
+	if len(c.FeatureEnvWriterNamespaces) > 0 {
+		return append([]string(nil), c.FeatureEnvWriterNamespaces...)
+	}
+	if strings.EqualFold(strings.TrimSpace(c.FeatureEnvWriterMode), "releaseNamespace") {
+		return normalizeRunnerNamespaceList(c.RunnerNamespace)
+	}
+	return []string{}
+}
+
+func (c runnerConfig) canRunHelmInNamespace(namespace string) bool {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return false
+	}
+	for _, permitted := range c.helmTargetNamespaces() {
+		if namespace == permitted {
+			return true
+		}
+	}
+	return false
 }
 
 func (c runnerConfig) validate() error {
@@ -521,6 +569,13 @@ func (c runnerConfig) validate() error {
 	}
 	if strings.TrimSpace(c.DeploymentMode) == "" {
 		return fmt.Errorf("ENVPILOT_RUNNER_DEPLOYMENT_MODE is required")
+	}
+	mode := strings.TrimSpace(c.FeatureEnvWriterMode)
+	if mode != "releaseNamespace" && mode != "preconfiguredNamespaces" && mode != "generatedFeatureNamespaces" {
+		return fmt.Errorf("ENVPILOT_FEATURE_ENV_WRITER_MODE must be releaseNamespace, preconfiguredNamespaces, or generatedFeatureNamespaces")
+	}
+	if (mode == "preconfiguredNamespaces" || mode == "generatedFeatureNamespaces") && len(c.FeatureEnvWriterNamespaces) == 0 {
+		return fmt.Errorf("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES is required for %s", mode)
 	}
 	if strings.TrimSpace(c.RegistrationToken) == "" && strings.TrimSpace(c.RunnerAuthToken) == "" {
 		return fmt.Errorf("set ENVPILOT_RUNNER_REGISTRATION_TOKEN or ENVPILOT_RUNNER_AUTH_TOKEN")
@@ -921,7 +976,7 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	if !found {
 		return true
 	}
-	result := executeRunnerCommand(ctx, command)
+	result := executeRunnerCommandForConfig(ctx, cfg, command)
 	result.ProjectID = cfg.ProjectID
 	result.ClusterID = cfg.ClusterID
 	result.RunnerID = cfg.RunnerID
@@ -1060,12 +1115,25 @@ func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) dom
 	return executeRunnerCommandWithBackend(ctx, command, orchestrator.NewHelmDirectBackend(nil))
 }
 
+func executeRunnerCommandForConfig(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand) domain.RunnerCommandResult {
+	return executeRunnerCommandWithNamespaceGuard(ctx, command, orchestrator.NewHelmDirectBackend(nil), cfg.canRunHelmInNamespace)
+}
+
 type runnerCommandBackend interface {
 	orchestrator.DeploymentBackend
 	DeploymentTarget(domain.Environment, domain.ProjectConfig) (string, string, error)
 }
 
 func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend) domain.RunnerCommandResult {
+	return executeRunnerCommandWithNamespaceGuard(ctx, command, backend, nil)
+}
+
+// executeRunnerCommandWithNamespaceGuard refuses an operation before invoking
+// Helm when the chart-managed ServiceAccount was not granted a Role in the
+// exact resolved release namespace. This prevents the late, misleading Helm
+// failure "cannot list secrets" and never delegates to a control-plane
+// kubeconfig.
+func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend, namespaceAllowed func(string) bool) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
 	projectConfig := projectConfigForRunnerCommand(command)
 	var err error
@@ -1085,6 +1153,11 @@ func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerC
 			result.Error = err.Error()
 			return result
 		}
+		if namespaceAllowed != nil && !namespaceAllowed(result.Namespace) {
+			result.ErrorCode = "runner_namespace_access_denied"
+			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
+			return result
+		}
 		err = backend.Apply(ctx, command.Environment, projectConfig)
 	case "delete":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
@@ -1092,11 +1165,21 @@ func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerC
 			result.Error = err.Error()
 			return result
 		}
+		if namespaceAllowed != nil && !namespaceAllowed(result.Namespace) {
+			result.ErrorCode = "runner_namespace_access_denied"
+			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
+			return result
+		}
 		err = backend.Delete(ctx, command.Environment, projectConfig)
 	case "status":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
+			return result
+		}
+		if namespaceAllowed != nil && !namespaceAllowed(result.Namespace) {
+			result.ErrorCode = "runner_namespace_access_denied"
+			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
 			return result
 		}
 		var status domain.EnvironmentStatus
@@ -1214,15 +1297,17 @@ func classifyHelmChartPreflightError(err error) (string, string) {
 
 func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string) error {
 	payload := domain.RunnerHeartbeatRequest{
-		ProjectID:       cfg.ProjectID,
-		ClusterID:       cfg.ClusterID,
-		RunnerID:        cfg.RunnerID,
-		DeploymentMode:  cfg.DeploymentMode,
-		RunnerNamespace: cfg.RunnerNamespace,
-		RunnerAuthToken: cfg.RunnerAuthToken,
-		Status:          status,
-		Error:           errorMessage,
-		ObservedAt:      time.Now().UTC(),
+		ProjectID:              cfg.ProjectID,
+		ClusterID:              cfg.ClusterID,
+		RunnerID:               cfg.RunnerID,
+		DeploymentMode:         cfg.DeploymentMode,
+		RunnerNamespace:        cfg.RunnerNamespace,
+		HelmTargetNamespaces:   cfg.helmTargetNamespaces(),
+		HelmNamespaceRBACReady: len(cfg.helmTargetNamespaces()) > 0,
+		RunnerAuthToken:        cfg.RunnerAuthToken,
+		Status:                 status,
+		Error:                  errorMessage,
+		ObservedAt:             time.Now().UTC(),
 	}
 	return runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/heartbeat", "", payload, nil)
 }

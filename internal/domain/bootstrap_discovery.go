@@ -259,15 +259,21 @@ type RunnerRegistrationResponse struct {
 }
 
 type RunnerHeartbeatRequest struct {
-	ProjectID       string    `json:"projectId,omitempty"`
-	ClusterID       string    `json:"clusterId"`
-	RunnerID        string    `json:"runnerId"`
-	DeploymentMode  string    `json:"deploymentMode,omitempty"`
-	RunnerNamespace string    `json:"runnerNamespace"`
-	RunnerAuthToken string    `json:"runnerAuthToken,omitempty"`
-	Status          string    `json:"status,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	ObservedAt      time.Time `json:"observedAt,omitempty"`
+	ProjectID       string `json:"projectId,omitempty"`
+	ClusterID       string `json:"clusterId"`
+	RunnerID        string `json:"runnerId"`
+	DeploymentMode  string `json:"deploymentMode,omitempty"`
+	RunnerNamespace string `json:"runnerNamespace"`
+	// HelmTargetNamespaces is the finite, chart-rendered set of namespaces for
+	// which this Runner ServiceAccount has Helm Direct writer RBAC. It contains
+	// no credentials and lets the control plane reject a command before Helm
+	// would fail on release-storage Secrets.
+	HelmTargetNamespaces   []string  `json:"helmTargetNamespaces,omitempty"`
+	HelmNamespaceRBACReady bool      `json:"helmNamespaceRBACReady"`
+	RunnerAuthToken        string    `json:"runnerAuthToken,omitempty"`
+	Status                 string    `json:"status,omitempty"`
+	Error                  string    `json:"error,omitempty"`
+	ObservedAt             time.Time `json:"observedAt,omitempty"`
 }
 
 type RunnerCommand struct {
