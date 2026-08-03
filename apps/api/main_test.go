@@ -161,6 +161,24 @@ func TestRunnerPostJSONClassifiesMissingBootstrapSessionForRecovery(t *testing.T
 	}
 }
 
+func TestRunnerPostJSONClassifiesExpiredBootstrapCredentialForRecovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body: io.NopCloser(strings.NewReader(`{"error":"runner bootstrap credentials have expired","code":"runner_bootstrap_credential_expired",` +
+				`"recovery":"rotate_runner_bootstrap_credentials"}`)),
+			Request: request,
+		}, nil
+	})}
+	err := fetchRunnerProjectConfig(context.Background(), runnerConfig{
+		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", ProjectConfigURL: "http://runner.test/api/v1/projects/checkout/runner-config", ProjectConfigToken: "expired-config-token",
+	}, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err == nil || !isRunnerStaleBootstrapIdentityError(err) {
+		t.Fatalf("project config error = %v, want recovery-required expired credential", err)
+	}
+}
+
 func TestRunnerPostJSONClassifiesFixtureIdentityReissueForAutomaticRecovery(t *testing.T) {
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{
@@ -288,6 +306,29 @@ func TestPollRunnerCommandsOnceStopsForMissingBootstrapSession(t *testing.T) {
 	}
 	if polls != 1 {
 		t.Fatalf("stale identity must be polled once, got %d polls", polls)
+	}
+}
+
+func TestPollRunnerCommandsOnceStopsForExpiredBootstrapCredential(t *testing.T) {
+	polls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		polls++
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"runner bootstrap credentials have expired","code":"runner_bootstrap_credential_expired","recovery":"rotate_runner_bootstrap_credentials"}`)),
+			Request:    request,
+		}, nil
+	})}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "expired-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	state := newRunnerRuntimeState()
+	health := &runnerHealth{}
+	if keepPolling := pollRunnerCommandsOnce(context.Background(), cfg, client, state, health, slog.New(slog.NewTextHandler(io.Discard, nil))); keepPolling {
+		t.Fatal("expired bootstrap credential must disable command polling")
+	}
+	status, reason := state.heartbeat()
+	if polls != 1 || !state.stale.Load() || !health.stale.Load() || health.online.Load() || status != string(domain.RunnerHeartbeatStatusDegraded) || reason == "" {
+		t.Fatalf("expired credential must leave one stale, non-online runner state: polls=%d status=%q reason=%q stale=%v health=%+v", polls, status, reason, state.stale.Load(), health)
 	}
 }
 

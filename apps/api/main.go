@@ -706,6 +706,11 @@ func runRunner(logger *slog.Logger) {
 	}
 	if registeredNow {
 		if err := fetchRunnerProjectConfig(ctx, cfg, client, logger); err != nil {
+			if isRunnerStaleBootstrapIdentityError(err) {
+				markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
+				<-ctx.Done()
+				return
+			}
 			logger.Warn("runner project config fetch failed", "error", err)
 		}
 	}
@@ -991,6 +996,10 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	result.RemoteClusterGeneration = command.RemoteClusterGeneration
 	result.RunnerIdentityIssuedAt = command.RunnerIdentityIssuedAt
 	if err := reportRunnerCommandResult(ctx, cfg, client, command.ID, result); err != nil {
+		if isRunnerStaleBootstrapIdentityError(err) {
+			markRunnerStaleBootstrapIdentity(state, health, logger, err)
+			return false
+		}
 		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
 	}
 	return true
@@ -1049,9 +1058,10 @@ func (e runnerAPIError) Error() string {
 func isRunnerStaleBootstrapIdentityError(err error) bool {
 	var apiError runnerAPIError
 	if errors.As(err, &apiError) {
-		return apiError.code == "bootstrap_session_not_found" || apiError.code == "stale_runner_bootstrap_identity"
+		return apiError.code == "bootstrap_session_not_found" || apiError.code == "stale_runner_bootstrap_identity" || apiError.code == "runner_bootstrap_credential_expired"
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "bootstrap session not found")
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "bootstrap session not found") || strings.Contains(message, "runner bootstrap credentials have expired")
 }
 
 func isRunnerFixtureIdentityReissuedError(err error) bool {
@@ -1378,7 +1388,7 @@ func runnerPostJSONWithHeaders(ctx context.Context, client *http.Client, endpoin
 		if detail == "" {
 			detail = strings.TrimSpace(string(responseBody))
 		}
-		if response.Code == "bootstrap_session_not_found" || response.Code == "stale_runner_bootstrap_identity" || strings.Contains(strings.ToLower(detail), "bootstrap session not found") {
+		if response.Code == "bootstrap_session_not_found" || response.Code == "stale_runner_bootstrap_identity" || response.Code == "runner_bootstrap_credential_expired" || strings.Contains(strings.ToLower(detail), "bootstrap session not found") || strings.Contains(strings.ToLower(detail), "runner bootstrap credentials have expired") {
 			code := strings.TrimSpace(response.Code)
 			if code == "" {
 				code = "bootstrap_session_not_found"
@@ -1402,7 +1412,7 @@ func runnerBootstrapIdentityErrorBody(body []byte) (string, string, bool) {
 	}
 	if json.Unmarshal(body, &response) == nil {
 		code := strings.TrimSpace(response.Code)
-		if code == "bootstrap_session_not_found" || code == "stale_runner_bootstrap_identity" {
+		if code == "bootstrap_session_not_found" || code == "stale_runner_bootstrap_identity" || code == "runner_bootstrap_credential_expired" {
 			return code, strings.TrimSpace(response.Recovery), true
 		}
 	}
