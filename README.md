@@ -26,16 +26,21 @@ or the runner credentials no longer match the persisted runner auth token. The
 runner remains live but unready; it deliberately does not CrashLoop or retry an
 invalid identity indefinitely.
 
-1. In Bootstrap, select an audited recovery reason and use **Rotate bootstrap
-   credentials**.
-2. Apply the newly generated one-time bootstrap Secret command.
-3. Run the newly generated `helm upgrade --install` command (or restart the
-   existing Deployment after applying equivalent Helm values).
+1. In **Settings → Remote clusters**, select the affected target and use the
+   audited **Rotate managed identity** or **Repair** action.
+2. The Remote Cluster Reconciler replaces the target Secret and rolls the same
+   release identity forward; it does not expose a command or raw credential.
+3. Wait for a fresh authenticated heartbeat before retrying environment work.
 
 The runner records only a hash of the registration token beside its persisted
 auth token. A new registration token therefore supersedes the old persisted
 auth token on the next rollout; do not delete the auth PVC as part of normal
 recovery. Never copy the one-time command into logs, Git, or support tickets.
+
+For remote targets the Runner is always installed by the management-cluster
+reconciler from signed compatibility pins. It must use a stable target-Pod-
+reachable HTTPS endpoint; Service DNS is supported only for same-cluster mode.
+See the [remote-cluster guide](https://github.com/envpilot/deploy/blob/main/docs/remote-clusters.md).
 
 ## Follow-up
 
