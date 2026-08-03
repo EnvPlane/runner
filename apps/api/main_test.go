@@ -81,7 +81,7 @@ func TestNextRunnerCommandClassifiesEndpointAndAuthenticationFailures(t *testing
 
 func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
 	cfg := runnerConfig{
-		ControlPlaneURL:          "http://host.minikube.internal:18080",
+		ControlPlaneURL:          "https://host.minikube.internal:18080",
 		ControlPlaneEndpointMode: "remote",
 		ProjectID:                "checkout",
 		ClusterID:                "remote-cluster",
@@ -89,11 +89,35 @@ func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
 		RunnerNamespace:          "envpilot",
 		DeploymentMode:           "helm",
 		RunnerAuthToken:          "runner-auth-token",
+		FeatureEnvWriterMode:     "releaseNamespace",
 		HeartbeatInterval:        time.Second,
 		ReportTimeout:            time.Second,
 	}
 	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "target-pod-reachable") {
 		t.Fatalf("remote host-local endpoint error=%v", err)
+	}
+}
+
+func TestRunnerConfigRequiresStableHTTPSForRemoteControlPlaneEndpoint(t *testing.T) {
+	cfg := runnerConfig{
+		ControlPlaneURL:          "http://api.remote.example",
+		ControlPlaneEndpointMode: "remote",
+		ProjectID:                "checkout",
+		ClusterID:                "remote-cluster",
+		RunnerID:                 "checkout-runner",
+		RunnerNamespace:          "envpilot",
+		DeploymentMode:           "helm",
+		RunnerAuthToken:          "runner-auth-token",
+		FeatureEnvWriterMode:     "releaseNamespace",
+		HeartbeatInterval:        time.Second,
+		ReportTimeout:            time.Second,
+	}
+	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "stable HTTPS") {
+		t.Fatalf("remote HTTP endpoint error=%v", err)
+	}
+	cfg.ControlPlaneURL = "https://api.remote.example"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("stable remote HTTPS endpoint must be valid: %v", err)
 	}
 }
 

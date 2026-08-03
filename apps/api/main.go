@@ -604,6 +604,9 @@ func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
 	if mode != "remote" {
 		return nil
 	}
+	if parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("remote ENVPILOT_CONTROL_PLANE_URL must be an explicit stable HTTPS URL without credentials, query parameters, or fragments")
+	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "envpilot.local" || host == "host.minikube.internal" || strings.HasSuffix(host, ".svc") || strings.Contains(host, ".svc.") {
 		return fmt.Errorf("remote ENVPILOT_CONTROL_PLANE_URL must be target-pod-reachable, not host-local or Kubernetes Service DNS")
