@@ -273,7 +273,7 @@ func TestPollRunnerCommandsOnceReportsTheClaimedAttemptID(t *testing.T) {
 		switch request.URL.Path {
 		case "/api/v1/runners/commands/next":
 			command := domain.RunnerCommand{
-				ID: "delete-42", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", Operation: "unsupported", AttemptID: "delete-42-attempt-2", Status: "claimed",
+				ID: "delete-42", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", Operation: "unsupported", AttemptID: "delete-42-attempt-2", Status: "claimed", RemoteClusterGeneration: 7, RunnerIdentityIssuedAt: "2026-08-03T12:00:00Z",
 				Environment: domain.Environment{ID: "pr-42", Project: "checkout", Namespace: "feature-42"},
 			}
 			body, _ := json.Marshal(command)
@@ -288,6 +288,9 @@ func TestPollRunnerCommandsOnceReportsTheClaimedAttemptID(t *testing.T) {
 			}
 			if result.AttemptID != "delete-42-attempt-2" {
 				t.Fatalf("result attempt ID=%q", result.AttemptID)
+			}
+			if result.RemoteClusterGeneration != 7 || result.RunnerIdentityIssuedAt != "2026-08-03T12:00:00Z" {
+				t.Fatalf("result lost managed target binding: %#v", result)
 			}
 			return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
 		default:
@@ -420,7 +423,7 @@ func TestRunnerAllowsHelmLifecycleOnlyInConfiguredTargetNamespace(t *testing.T) 
 		FeatureEnvWriterMode:       "preconfiguredNamespaces",
 		FeatureEnvWriterNamespaces: []string{"envpilot-pr-201"},
 	}
-	for _, operation := range []string{"create", "recreate", "status", "delete"} {
+	for _, operation := range []string{"create", "recreate", "status", "delete", "force_cleanup"} {
 		t.Run(operation, func(t *testing.T) {
 			result := executeRunnerCommandWithNamespaceGuard(context.Background(), domain.RunnerCommand{
 				ID: "allowed-" + operation, Operation: operation,

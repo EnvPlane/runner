@@ -982,6 +982,11 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	result.RunnerID = cfg.RunnerID
 	result.RunnerAuthToken = cfg.RunnerAuthToken
 	result.AttemptID = command.AttemptID
+	// Echo the safe target and credential-epoch binding. The control plane
+	// rejects a completion if reconciliation or Runner identity changed while
+	// Helm was executing, instead of applying an old result to a new target.
+	result.RemoteClusterGeneration = command.RemoteClusterGeneration
+	result.RunnerIdentityIssuedAt = command.RunnerIdentityIssuedAt
 	if err := reportRunnerCommandResult(ctx, cfg, client, command.ID, result); err != nil {
 		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
 	}
@@ -1160,7 +1165,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 			return result
 		}
 		err = backend.Apply(ctx, command.Environment, projectConfig)
-	case "delete":
+	case "delete", "force_cleanup":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
@@ -1171,6 +1176,11 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
 			return result
 		}
+		// HelmDirectBackend.Delete is deliberately label-owned: it ignores a
+		// shared namespace and deletes a dedicated namespace only after the
+		// envpilot.io managed/project/environment labels match the command.
+		// The Runner therefore remains the sole Kubernetes actor even for an
+		// audited force-clean recovery command.
 		err = backend.Delete(ctx, command.Environment, projectConfig)
 	case "status":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
