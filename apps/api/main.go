@@ -981,6 +981,7 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	result.ClusterID = cfg.ClusterID
 	result.RunnerID = cfg.RunnerID
 	result.RunnerAuthToken = cfg.RunnerAuthToken
+	result.AttemptID = command.AttemptID
 	if err := reportRunnerCommandResult(ctx, cfg, client, command.ID, result); err != nil {
 		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
 	}

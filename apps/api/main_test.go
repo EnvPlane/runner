@@ -267,6 +267,46 @@ func TestPollRunnerCommandsOnceStopsForMissingBootstrapSession(t *testing.T) {
 	}
 }
 
+func TestPollRunnerCommandsOnceReportsTheClaimedAttemptID(t *testing.T) {
+	resultCalls := 0
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/api/v1/runners/commands/next":
+			command := domain.RunnerCommand{
+				ID: "delete-42", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", Operation: "unsupported", AttemptID: "delete-42-attempt-2", Status: "claimed",
+				Environment: domain.Environment{ID: "pr-42", Project: "checkout", Namespace: "feature-42"},
+			}
+			body, _ := json.Marshal(command)
+			headers := make(http.Header)
+			headers.Set(runnerCommandAPIVersionHeader, runnerCommandAPIVersion)
+			return &http.Response{StatusCode: http.StatusOK, Header: headers, Body: io.NopCloser(bytes.NewReader(body)), Request: request}, nil
+		case "/api/v1/runners/commands/delete-42/result":
+			resultCalls++
+			var result domain.RunnerCommandResult
+			if err := json.NewDecoder(request.Body).Decode(&result); err != nil {
+				t.Fatalf("decode command result: %v", err)
+			}
+			if result.AttemptID != "delete-42-attempt-2" {
+				t.Fatalf("result attempt ID=%q", result.AttemptID)
+			}
+			return &http.Response{StatusCode: http.StatusAccepted, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+		default:
+			t.Fatalf("unexpected request %s", request.URL.Path)
+			return nil, nil
+		}
+	})}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	state := newRunnerRuntimeState()
+	health := &runnerHealth{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if keepPolling := pollRunnerCommandsOnce(context.Background(), cfg, client, state, health, logger); !keepPolling {
+		t.Fatal("successful command callback must keep polling")
+	}
+	if resultCalls != 1 {
+		t.Fatalf("result callbacks=%d, want 1", resultCalls)
+	}
+}
+
 func TestClassifyHelmChartPreflightError(t *testing.T) {
 	tests := []struct {
 		name string

@@ -277,18 +277,23 @@ type RunnerHeartbeatRequest struct {
 }
 
 type RunnerCommand struct {
-	ID            string        `json:"id"`
-	ProjectID     string        `json:"projectId"`
-	ClusterID     string        `json:"clusterId"`
-	RunnerID      string        `json:"runnerId"`
-	Operation     string        `json:"operation"`
-	ChartRef      string        `json:"chartRef,omitempty"`
-	ChartVersion  string        `json:"chartVersion,omitempty"`
-	Environment   Environment   `json:"environment"`
-	ProjectConfig ProjectConfig `json:"projectConfig"`
-	Status        string        `json:"status"`
-	CreatedAt     time.Time     `json:"createdAt"`
-	ClaimedAt     *time.Time    `json:"claimedAt,omitempty"`
+	ID             string        `json:"id"`
+	ProjectID      string        `json:"projectId"`
+	ClusterID      string        `json:"clusterId"`
+	RunnerID       string        `json:"runnerId"`
+	Operation      string        `json:"operation"`
+	ChartRef       string        `json:"chartRef,omitempty"`
+	ChartVersion   string        `json:"chartVersion,omitempty"`
+	Environment    Environment   `json:"environment"`
+	ProjectConfig  ProjectConfig `json:"projectConfig"`
+	Status         string        `json:"status"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	ClaimedAt      *time.Time    `json:"claimedAt,omitempty"`
+	Attempt        int           `json:"attempt,omitempty"`
+	AttemptID      string        `json:"attemptId,omitempty"`
+	LeaseExpiresAt *time.Time    `json:"leaseExpiresAt,omitempty"`
+	MaxAttempts    int           `json:"maxAttempts,omitempty"`
+	LastError      string        `json:"lastError,omitempty"`
 }
 
 type RunnerCommandResult struct {
@@ -297,6 +302,7 @@ type RunnerCommandResult struct {
 	RunnerID          string `json:"runnerId"`
 	RunnerAuthToken   string `json:"runnerAuthToken"`
 	CommandID         string `json:"commandId"`
+	AttemptID         string `json:"attemptId,omitempty"`
 	Status            string `json:"status"`
 	ReleaseName       string `json:"releaseName,omitempty"`
 	Namespace         string `json:"namespace,omitempty"`
