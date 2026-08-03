@@ -669,11 +669,17 @@ func (b *HelmDirectBackend) targetNamespace(environment domain.Environment, conf
 	namespace := strings.TrimSpace(environment.Namespace)
 	switch strings.ToLower(strings.TrimSpace(config.namespaceMode)) {
 	case "shared":
+		if rendered := strings.TrimSpace(b.renderTemplatePattern(config.namespacePattern, environment)); rendered != "" {
+			return rendered
+		}
 		if namespace != "" {
 			return namespace
 		}
 		return strings.TrimSpace(environment.Project)
 	default:
+		if rendered := strings.TrimSpace(b.renderTemplatePattern(config.namespacePattern, environment)); rendered != "" {
+			return rendered
+		}
 		if namespace != "" {
 			return namespace
 		}
@@ -683,31 +689,61 @@ func (b *HelmDirectBackend) targetNamespace(environment domain.Environment, conf
 
 func (b *HelmDirectBackend) renderReleaseName(environment domain.Environment, projectConfig domain.ProjectConfig) (string, error) {
 	config := resolveHelmDirectConfig(projectConfig)
-	templateData := map[string]map[string]string{
-		"project": {
-			"id": strings.TrimSpace(environment.Project),
-		},
-		"environment": {
-			"id":        strings.TrimSpace(environment.ID),
-			"name":      strings.TrimSpace(environment.ID),
-			"projectId": strings.TrimSpace(environment.Project),
-		},
-		"source": {
-			"pr":     strings.TrimSpace(environment.Source.PullRequestID),
-			"mr":     strings.TrimSpace(environment.Source.PullRequestID),
-			"branch": strings.TrimSpace(environment.Source.Branch),
-			"commit": strings.TrimSpace(environment.Source.Commit),
-		},
-	}
 	t, err := template.New("release").Parse(strings.TrimSpace(config.releaseNamePattern))
 	if err != nil {
 		return "", err
 	}
 	var output bytes.Buffer
-	if err := t.Execute(&output, templateData); err != nil {
+	if err := t.Execute(&output, b.helmDirectTemplateData(environment)); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(output.String()), nil
+}
+
+func (b *HelmDirectBackend) renderTemplatePattern(pattern string, environment domain.Environment) string {
+	pattern = strings.TrimSpace(pattern)
+	if pattern == "" {
+		return ""
+	}
+	t, err := template.New("pattern").Parse(pattern)
+	if err != nil {
+		return ""
+	}
+	var output bytes.Buffer
+	if err := t.Execute(&output, b.helmDirectTemplateData(environment)); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(output.String())
+}
+
+func (b *HelmDirectBackend) helmDirectTemplateData(environment domain.Environment) map[string]any {
+	projectID := strings.TrimSpace(environment.Project)
+	environmentID := strings.TrimSpace(environment.ID)
+	prNumber := strings.TrimSpace(environment.Source.PullRequestID)
+	branch := strings.TrimSpace(environment.Source.Branch)
+	commit := strings.TrimSpace(environment.Source.Commit)
+	return map[string]any{
+		"ProjectID":     projectID,
+		"EnvironmentID": environmentID,
+		"PRNumber":      prNumber,
+		"MRNumber":      prNumber,
+		"Branch":        branch,
+		"CommitSHA":     commit,
+		"project": map[string]string{
+			"id": projectID,
+		},
+		"environment": map[string]string{
+			"id":        environmentID,
+			"name":      environmentID,
+			"projectId": projectID,
+		},
+		"source": map[string]string{
+			"pr":     prNumber,
+			"mr":     prNumber,
+			"branch": branch,
+			"commit": commit,
+		},
+	}
 }
 
 func (b *HelmDirectBackend) shouldDeleteNamespace(environment domain.Environment, config helmDirectConfig, namespace string) bool {
@@ -778,6 +814,7 @@ func (b *HelmDirectBackend) renderHelmImageValues(environment domain.Environment
 
 type helmDirectConfig struct {
 	namespaceMode      string
+	namespacePattern   string
 	releaseNamePattern string
 	chartRef           string
 	chartVersion       string
@@ -814,6 +851,9 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 		if text := strings.TrimSpace(asString(value)); text != "" {
 			config.namespaceMode = text
 		}
+	}
+	if value := asString(helmDirectConfigValue["namespacePattern"]); strings.TrimSpace(value) != "" {
+		config.namespacePattern = strings.TrimSpace(value)
 	}
 	if value := asString(helmDirectConfigValue["releaseNamePattern"]); strings.TrimSpace(value) != "" {
 		config.releaseNamePattern = strings.TrimSpace(value)

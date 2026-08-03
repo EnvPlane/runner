@@ -465,6 +465,27 @@ func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendSharedNamespaceUsesCompiledNamespacePattern(t *testing.T) {
+	backend := NewHelmDirectBackend(nil)
+	environment := domain.Environment{
+		ID: "fixture-pr-201", Project: "envpilot-e2e-fixture", Namespace: "envpilot-pr-201",
+		Source: domain.SCMSource{PullRequestID: "201"},
+	}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+			"namespaceMode": "shared", "namespacePattern": "envpilot-e2e-feature",
+			"releaseNamePattern": "{{ .project.id }}-{{ .environment.name }}",
+		}},
+	}}
+	_, namespace, err := backend.DeploymentTarget(environment, projectConfig)
+	if err != nil {
+		t.Fatalf("deployment target: %v", err)
+	}
+	if namespace != "envpilot-e2e-feature" {
+		t.Fatalf("shared namespace target = %q", namespace)
+	}
+}
+
 func TestHelmDirectBackendRenderCustomEnvironmentMetadataAndValues(t *testing.T) {
 	backend := NewHelmDirectBackend(nil)
 	environment := domain.Environment{
