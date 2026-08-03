@@ -1,0 +1,7 @@
+.git
+.github
+.codex
+.DS_Store
+tmp
+dist
+*.test
