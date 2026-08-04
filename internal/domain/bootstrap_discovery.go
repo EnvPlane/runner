@@ -268,12 +268,27 @@ type RunnerHeartbeatRequest struct {
 	// which this Runner ServiceAccount has Helm Direct writer RBAC. It contains
 	// no credentials and lets the control plane reject a command before Helm
 	// would fail on release-storage Secrets.
-	HelmTargetNamespaces   []string  `json:"helmTargetNamespaces,omitempty"`
-	HelmNamespaceRBACReady bool      `json:"helmNamespaceRBACReady"`
-	RunnerAuthToken        string    `json:"runnerAuthToken,omitempty"`
-	Status                 string    `json:"status,omitempty"`
-	Error                  string    `json:"error,omitempty"`
-	ObservedAt             time.Time `json:"observedAt,omitempty"`
+	HelmTargetNamespaces   []string                     `json:"helmTargetNamespaces,omitempty"`
+	HelmNamespaceRBACReady bool                         `json:"helmNamespaceRBACReady"`
+	RunnerAuthToken        string                       `json:"runnerAuthToken,omitempty"`
+	Status                 string                       `json:"status,omitempty"`
+	Error                  string                       `json:"error,omitempty"`
+	EndpointPreflight      *ManagementEndpointPreflight `json:"endpoint_preflight,omitempty"`
+	ObservedAt             time.Time                    `json:"observedAt,omitempty"`
+}
+
+// ManagementEndpointPreflight contains only safe target-Pod connectivity
+// observation. Endpoint URLs, CA bytes and bearer credentials never cross this
+// API contract.
+type ManagementEndpointPreflight struct {
+	Generation      int64      `json:"generation"`
+	Code            string     `json:"code"`
+	DNSResolved     bool       `json:"dns_resolved"`
+	TCPConnected    bool       `json:"tcp_connected"`
+	TLSVerified     bool       `json:"tls_verified"`
+	HealthReachable bool       `json:"health_reachable"`
+	RuntimeAccess   bool       `json:"runtime_access"`
+	CheckedAt       *time.Time `json:"checked_at,omitempty"`
 }
 
 type RunnerCommand struct {

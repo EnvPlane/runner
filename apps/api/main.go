@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -445,6 +446,8 @@ type runnerConfig struct {
 	ControlPlaneURL            string
 	ControlPlaneEndpointMode   string
 	ControlPlaneCAFile         string
+	ControlPlaneTLSServerName  string
+	RemoteGeneration           int64
 	ProjectID                  string
 	ClusterID                  string
 	RunnerID                   string
@@ -482,6 +485,8 @@ func runnerConfigFromEnv() runnerConfig {
 		ControlPlaneURL:            strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
 		ControlPlaneEndpointMode:   strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
 		ControlPlaneCAFile:         getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
+		ControlPlaneTLSServerName:  getenv("ENVPILOT_CONTROL_PLANE_TLS_SERVER_NAME", ""),
+		RemoteGeneration:           int64(getenvInt("ENVPILOT_REMOTE_GENERATION", 0)),
 		ProjectID:                  getenv("ENVPILOT_PROJECT_ID", ""),
 		ClusterID:                  getenv("ENVPILOT_CLUSTER_ID", "default"),
 		RunnerID:                   getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
@@ -552,7 +557,7 @@ func (c runnerConfig) validate() error {
 	if err := validateRunnerControlPlaneEndpoint(c.ControlPlaneURL, c.ControlPlaneEndpointMode); err != nil {
 		return err
 	}
-	if _, err := newRunnerControlPlaneHTTPClient(c.ReportTimeout, c.ControlPlaneCAFile); err != nil {
+	if _, err := newRunnerControlPlaneHTTPClientWithTLS(c.ReportTimeout, c.ControlPlaneCAFile, c.ControlPlaneTLSServerName); err != nil {
 		return fmt.Errorf("invalid control-plane TLS configuration: %w", err)
 	}
 	if strings.TrimSpace(c.ProjectID) == "" {
@@ -615,6 +620,10 @@ func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
 }
 
 func newRunnerControlPlaneHTTPClient(timeout time.Duration, caFile string) (*http.Client, error) {
+	return newRunnerControlPlaneHTTPClientWithTLS(timeout, caFile, "")
+}
+
+func newRunnerControlPlaneHTTPClientWithTLS(timeout time.Duration, caFile, serverName string) (*http.Client, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
@@ -631,7 +640,9 @@ func newRunnerControlPlaneHTTPClient(timeout time.Duration, caFile string) (*htt
 		if !roots.AppendCertsFromPEM(pem) {
 			return nil, fmt.Errorf("control-plane CA file contains no certificates")
 		}
-		transport.TLSClientConfig = &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}
+		transport.TLSClientConfig = &tls.Config{RootCAs: roots, ServerName: strings.TrimSpace(serverName), MinVersion: tls.VersionTLS12}
+	} else if strings.TrimSpace(serverName) != "" {
+		transport.TLSClientConfig = &tls.Config{ServerName: strings.TrimSpace(serverName), MinVersion: tls.VersionTLS12}
 	}
 	return &http.Client{Timeout: timeout, Transport: transport}, nil
 }
@@ -649,7 +660,7 @@ func runRunnerConnectivityCheck(logger *slog.Logger) {
 		logger.Error("runner control-plane connectivity check failed", "error", err)
 		os.Exit(1)
 	}
-	client, err := newRunnerControlPlaneHTTPClient(cfg.ReportTimeout, cfg.ControlPlaneCAFile)
+	client, err := newRunnerControlPlaneHTTPClientWithTLS(cfg.ReportTimeout, cfg.ControlPlaneCAFile, cfg.ControlPlaneTLSServerName)
 	if err != nil {
 		logger.Error("runner control-plane connectivity check failed", "error", err)
 		os.Exit(1)
@@ -687,7 +698,7 @@ func runRunner(logger *slog.Logger) {
 	runtimeState := newRunnerRuntimeState()
 	go serveRunnerHealth(ctx, cfg.HealthAddr, health, logger)
 
-	client, err := newRunnerControlPlaneHTTPClient(cfg.ReportTimeout, cfg.ControlPlaneCAFile)
+	client, err := newRunnerControlPlaneHTTPClientWithTLS(cfg.ReportTimeout, cfg.ControlPlaneCAFile, cfg.ControlPlaneTLSServerName)
 	if err != nil {
 		logger.Error("invalid control-plane TLS configuration", "error", err)
 		return
@@ -714,7 +725,12 @@ func runRunner(logger *slog.Logger) {
 			logger.Warn("runner project config fetch failed", "error", err)
 		}
 	}
-	if err := reportRunnerHeartbeat(ctx, cfg, client, string(domain.RunnerHeartbeatStatusOnline), ""); err != nil {
+	preflight := probeRunnerManagementEndpoint(ctx, cfg, client)
+	initialStatus, initialError := string(domain.RunnerHeartbeatStatusOnline), ""
+	if preflight.Code != "passed" {
+		initialStatus, initialError = string(domain.RunnerHeartbeatStatusDegraded), "management endpoint preflight failed: "+preflight.Code
+	}
+	if err := reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, initialStatus, initialError, preflight); err != nil {
 		if isRunnerFixtureIdentityReissuedError(err) {
 			prepareRunnerFixtureRecovery(cfg, logger)
 			return
@@ -728,7 +744,7 @@ func runRunner(logger *slog.Logger) {
 		logger.Error("initial runner heartbeat failed", "error", err)
 		os.Exit(1)
 	}
-	health.set(true)
+	health.set(preflight.Code == "passed")
 	logger.Info("envpilot runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
 	go runRunnerCommands(ctx, cfg, client, runtimeState, health, logger)
 	runRunnerHeartbeat(ctx, cfg, client, runtimeState, health, logger, stop)
@@ -897,7 +913,11 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 				return
 			}
 			status, statusError := state.heartbeat()
-			if err := reportRunnerHeartbeat(ctx, cfg, client, status, statusError); err != nil {
+			preflight := probeRunnerManagementEndpoint(ctx, cfg, client)
+			if preflight.Code != "passed" {
+				status, statusError = string(domain.RunnerHeartbeatStatusDegraded), "management endpoint preflight failed: "+preflight.Code
+			}
+			if err := reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, status, statusError, preflight); err != nil {
 				if isRunnerFixtureIdentityReissuedError(err) {
 					prepareRunnerFixtureRecovery(cfg, logger)
 					stop()
@@ -1320,6 +1340,10 @@ func classifyHelmChartPreflightError(err error) (string, string) {
 }
 
 func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string) error {
+	return reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, status, errorMessage, nil)
+}
+
+func reportRunnerHeartbeatWithEndpointPreflight(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string, preflight *domain.ManagementEndpointPreflight) error {
 	payload := domain.RunnerHeartbeatRequest{
 		ProjectID:              cfg.ProjectID,
 		ClusterID:              cfg.ClusterID,
@@ -1331,9 +1355,75 @@ func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.C
 		RunnerAuthToken:        cfg.RunnerAuthToken,
 		Status:                 status,
 		Error:                  errorMessage,
+		EndpointPreflight:      preflight,
 		ObservedAt:             time.Now().UTC(),
 	}
 	return runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/heartbeat", "", payload, nil)
+}
+
+func probeRunnerManagementEndpoint(ctx context.Context, cfg runnerConfig, client *http.Client) *domain.ManagementEndpointPreflight {
+	checked := time.Now().UTC()
+	report := &domain.ManagementEndpointPreflight{Generation: cfg.RemoteGeneration, Code: "dns_failed", CheckedAt: &checked}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ControlPlaneURL, "/")+"/api/v1/health", nil)
+	if err != nil {
+		return report
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		report.Code = classifyRunnerEndpointProbeError(err)
+		return report
+	}
+	defer resp.Body.Close()
+	report.DNSResolved, report.TCPConnected = true, true
+	if strings.HasPrefix(strings.ToLower(cfg.ControlPlaneURL), "https://") {
+		report.TLSVerified = true
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		report.Code = "endpoint_unhealthy"
+		return report
+	}
+	report.HealthReachable = true
+	query := url.Values{}
+	query.Set("projectId", cfg.ProjectID)
+	query.Set("clusterId", cfg.ClusterID)
+	query.Set("runnerId", cfg.RunnerID)
+	accessReq, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ControlPlaneURL, "/")+"/api/v1/runners/runtime-access?"+query.Encode(), nil)
+	if err != nil {
+		return report
+	}
+	accessReq.Header.Set("Authorization", "Bearer "+cfg.RunnerAuthToken)
+	accessResp, err := client.Do(accessReq)
+	if err != nil {
+		report.Code = "runtime_auth_failed"
+		return report
+	}
+	defer accessResp.Body.Close()
+	if accessResp.StatusCode != http.StatusNoContent {
+		report.Code = "runtime_auth_failed"
+		return report
+	}
+	report.RuntimeAccess = true
+	report.Code = "passed"
+	return report
+}
+
+func classifyRunnerEndpointProbeError(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return "dns_failed"
+	}
+	var unknownCA x509.UnknownAuthorityError
+	if errors.As(err, &unknownCA) {
+		return "tls_ca_failed"
+	}
+	message := strings.ToLower(err.Error())
+	if strings.Contains(message, "certificate") && (strings.Contains(message, "not valid for") || strings.Contains(message, "server name")) {
+		return "tls_server_name_mismatch"
+	}
+	if strings.Contains(message, "certificate") || strings.Contains(message, "tls") {
+		return "tls_ca_failed"
+	}
+	return "tcp_failed"
 }
 
 func reportRunnerCommandResult(ctx context.Context, cfg runnerConfig, client *http.Client, commandID string, result domain.RunnerCommandResult) error {
