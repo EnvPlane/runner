@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
@@ -118,6 +119,36 @@ func TestRunnerConfigRequiresStableHTTPSForRemoteControlPlaneEndpoint(t *testing
 	cfg.ControlPlaneURL = "https://api.remote.example"
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("stable remote HTTPS endpoint must be valid: %v", err)
+	}
+}
+
+func TestRunnerControlPlaneHTTPClientTrustsMountedPrivateCA(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/health" {
+			t.Fatalf("path=%q", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	certificate := server.Certificate()
+	if certificate == nil || len(certificate.DNSNames) == 0 {
+		t.Fatal("TLS fixture certificate must contain a server name")
+	}
+	caPath := filepath.Join(t.TempDir(), "management-ca.pem")
+	if err := os.WriteFile(caPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certificate.Raw}), 0o600); err != nil {
+		t.Fatalf("write private CA fixture: %v", err)
+	}
+	client, err := newRunnerControlPlaneHTTPClientWithTLS(time.Second, caPath, certificate.DNSNames[0])
+	if err != nil {
+		t.Fatalf("build private-CA runner client: %v", err)
+	}
+	response, err := client.Get(server.URL + "/api/v1/health")
+	if err != nil {
+		t.Fatalf("private-CA runner health request: %v", err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("private-CA runner health status=%d", response.StatusCode)
 	}
 }
 
