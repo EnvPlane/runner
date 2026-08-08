@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 type ResourceSelection struct {

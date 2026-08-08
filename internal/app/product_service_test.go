@@ -1,7 +1,7 @@
 package app
 
 import (
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 	"testing"
 )
 
@@ -37,7 +37,7 @@ func TestValidateProductTemplateRejectsMissingMode(t *testing.T) {
 
 func ProductTemplateFromTest() domain.ProductTemplate {
 	return domain.ProductTemplate{
-		Name:            "payments",
+		Name:             "payments",
 		ManifestSourceID: "payments-template",
 		BasePath:         "",
 		DefaultMode:      domain.ModeHybrid,
@@ -49,17 +49,17 @@ func ProductTemplateFromTest() domain.ProductTemplate {
 
 func ProductTemplateFromTestNoServices() domain.ProductTemplate {
 	return domain.ProductTemplate{
-		Name:       "payments",
-		BasePath:   "charts/payments",
+		Name:        "payments",
+		BasePath:    "charts/payments",
 		DefaultMode: domain.ModeHybrid,
 	}
 }
 
 func ProductTemplateFromTestInvalidMode() domain.ProductTemplate {
 	return domain.ProductTemplate{
-		Name:       "payments",
-		BasePath:   "charts/payments",
+		Name:        "payments",
+		BasePath:    "charts/payments",
 		DefaultMode: "sidecar",
-		Services:   []domain.ServiceTemplate{{Name: "api", DefaultTag: "latest"}},
+		Services:    []domain.ServiceTemplate{{Name: "api", DefaultTag: "latest"}},
 	}
 }

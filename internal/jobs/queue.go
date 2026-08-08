@@ -8,7 +8,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
-	"envpilot/internal/redisqueue"
+	"github.com/envpilot/runner/internal/redisqueue"
 )
 
 type Queue interface {

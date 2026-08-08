@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/gitops"
+	"github.com/envpilot/runner/internal/gitops"
 )
 
 type Config struct {

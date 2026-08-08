@@ -10,12 +10,12 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/internal/catalog"
-	"envpilot/internal/config"
-	"envpilot/internal/domain"
-	"envpilot/internal/gitops"
-	"envpilot/internal/orchestrator"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/internal/catalog"
+	"github.com/envpilot/runner/internal/config"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/gitops"
+	"github.com/envpilot/runner/internal/orchestrator"
+	"github.com/envpilot/runner/internal/store"
 )
 
 func TestMain(m *testing.M) {

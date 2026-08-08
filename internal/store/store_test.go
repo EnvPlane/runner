@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 func TestJSONStorePersistsEnvironments(t *testing.T) {

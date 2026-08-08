@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/internal/domain"
-	"envpilot/internal/postgres"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/postgres"
 )
 
 func TestSQLStoreCRUD(t *testing.T) {

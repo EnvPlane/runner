@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 func TestResolverResolvesEnvSecret(t *testing.T) {

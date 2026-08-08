@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 type EventCollector struct {

@@ -27,14 +27,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"envpilot/internal/app"
-	"envpilot/internal/bootstrap"
-	"envpilot/internal/config"
-	"envpilot/internal/domain"
-	"envpilot/internal/jobs"
-	"envpilot/internal/scm"
-	"envpilot/internal/secrets"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/internal/app"
+	"github.com/envpilot/runner/internal/bootstrap"
+	"github.com/envpilot/runner/internal/config"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/jobs"
+	"github.com/envpilot/runner/internal/scm"
+	"github.com/envpilot/runner/internal/secrets"
+	"github.com/envpilot/runner/internal/store"
 )
 
 //go:embed openapi.json

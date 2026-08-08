@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/domain"
-	"envpilot/internal/secrets"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/secrets"
 )
 
 type SettingsProvider interface {

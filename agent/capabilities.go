@@ -9,7 +9,7 @@ import (
 	"sort"
 	"strings"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 type ClusterCapabilities struct {

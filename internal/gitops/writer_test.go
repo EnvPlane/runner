@@ -224,22 +224,22 @@ func TestRepositoryWriterPullRequestStrategyCreatesProposal(t *testing.T) {
 	defer server.Close()
 
 	writer, err := NewRepositoryWriter(RepositoryTarget{
-		URL:               remote,
-		Provider:          "github",
-		Branch:            "main",
-		BranchStrategy:    "pull-request",
-		Path:              "clusters/dev",
-		SecretValue:       "test-token",
-		Workspace:         filepath.Join(t.TempDir(), "worktree"),
-		Commit:            true,
-		Push:              true,
-		PushRemote:        "origin",
-		PushBranch:        "envpilot/pr-123",
-		AuthorName:        "envpilot",
-		AuthorEmail:       "envpilot@example.com",
-		PullRequestAPI:    server.URL,
-		PullRequestTitle:  "EnvPilot pr-123",
-		PullRequestBody:   "Generated for pr-123",
+		URL:              remote,
+		Provider:         "github",
+		Branch:           "main",
+		BranchStrategy:   "pull-request",
+		Path:             "clusters/dev",
+		SecretValue:      "test-token",
+		Workspace:        filepath.Join(t.TempDir(), "worktree"),
+		Commit:           true,
+		Push:             true,
+		PushRemote:       "origin",
+		PushBranch:       "envpilot/pr-123",
+		AuthorName:       "envpilot",
+		AuthorEmail:      "envpilot@example.com",
+		PullRequestAPI:   server.URL,
+		PullRequestTitle: "EnvPilot pr-123",
+		PullRequestBody:  "Generated for pr-123",
 	})
 	if err != nil {
 		t.Fatalf("repository writer: %v", err)

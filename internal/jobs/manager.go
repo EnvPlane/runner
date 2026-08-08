@@ -9,10 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"envpilot/internal/app"
-	"envpilot/internal/domain"
-	"envpilot/internal/scm"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/internal/app"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/scm"
+	"github.com/envpilot/runner/internal/store"
 )
 
 type Type string

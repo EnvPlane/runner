@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 const defaultCleanupTimeout = 30 * time.Second

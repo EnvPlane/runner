@@ -17,9 +17,9 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/agent"
-	"envpilot/internal/domain"
-	"envpilot/internal/orchestrator"
+	"github.com/envpilot/runner/agent"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/orchestrator"
 )
 
 type fakeCapabilitySource struct {

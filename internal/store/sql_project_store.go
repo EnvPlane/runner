@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 type SQLProjectStore struct {
@@ -172,4 +172,3 @@ func scanProject(scanner rowScanner) (domain.Project, error) {
 	}
 	return project, nil
 }
-

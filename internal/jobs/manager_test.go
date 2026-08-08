@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/internal/app"
-	"envpilot/internal/catalog"
-	"envpilot/internal/config"
-	"envpilot/internal/domain"
-	"envpilot/internal/gitops"
-	"envpilot/internal/scm"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/internal/app"
+	"github.com/envpilot/runner/internal/catalog"
+	"github.com/envpilot/runner/internal/config"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/gitops"
+	"github.com/envpilot/runner/internal/scm"
+	"github.com/envpilot/runner/internal/store"
 )
 
 func TestSubmitSCMEventOpenedQueuesCreateJob(t *testing.T) {

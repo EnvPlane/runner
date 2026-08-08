@@ -25,14 +25,14 @@ import (
 	"testing"
 	"time"
 
-	"envpilot/agent"
-	"envpilot/internal/app"
-	"envpilot/internal/catalog"
-	"envpilot/internal/config"
-	"envpilot/internal/domain"
-	"envpilot/internal/gitops"
-	"envpilot/internal/jobs"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/agent"
+	"github.com/envpilot/runner/internal/app"
+	"github.com/envpilot/runner/internal/catalog"
+	"github.com/envpilot/runner/internal/config"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/gitops"
+	"github.com/envpilot/runner/internal/jobs"
+	"github.com/envpilot/runner/internal/store"
 )
 
 func testRepoRoot() string {

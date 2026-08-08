@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 var ErrNotFound = errors.New("job not found")

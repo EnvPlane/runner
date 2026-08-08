@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"envpilot/internal/bootstrap"
-	"envpilot/internal/catalog"
-	"envpilot/internal/config"
-	"envpilot/internal/domain"
-	"envpilot/internal/gitops"
-	"envpilot/internal/orchestrator"
-	scmcomment "envpilot/internal/scm/comment"
-	"envpilot/internal/secrets"
-	"envpilot/internal/store"
+	"github.com/envpilot/runner/internal/bootstrap"
+	"github.com/envpilot/runner/internal/catalog"
+	"github.com/envpilot/runner/internal/config"
+	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/runner/internal/gitops"
+	"github.com/envpilot/runner/internal/orchestrator"
+	scmcomment "github.com/envpilot/runner/internal/scm/comment"
+	"github.com/envpilot/runner/internal/secrets"
+	"github.com/envpilot/runner/internal/store"
 )
 
 type EnvironmentService struct {
@@ -921,7 +921,7 @@ func (s *EnvironmentService) gitOpsWriterForEnvironment(ctx context.Context, env
 	branchStrategy := normalizeGitOpsBranchStrategy(repository.BranchStrategy)
 	pushBranch := branch
 	if branchStrategy == "branch" || branchStrategy == "pull-request" {
-		pushBranch = "envpilot/" + environment.ID
+		pushBranch = "github.com/envpilot/runner/" + environment.ID
 	}
 	workspaceRoot := filepath.Join(s.cfg.DataDir, "gitops-repositories")
 	workspace := gitops.RepositoryWorkspace(workspaceRoot, repository.URL, branch)

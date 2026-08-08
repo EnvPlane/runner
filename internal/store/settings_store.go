@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"envpilot/internal/domain"
+	"github.com/envpilot/runner/internal/domain"
 )
 
 type SettingsStore interface {
