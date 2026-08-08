@@ -7,6 +7,7 @@ on:
     paths:
       - 'Dockerfile'
       - 'apps/**'
+      - 'cmd/**'
       - 'internal/**'
       - 'go.mod'
       - 'go.sum'
@@ -61,7 +62,7 @@ jobs:
           client-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: bootstrap,contracts,deploy,frontend
+          repositories: agent,bootstrap,contracts,deploy,frontend
           permission-contents: read
       - name: Configure private Go modules
         env:

@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/runner/agent"
+	"github.com/envpilot/agent/agent"
 	"github.com/envpilot/runner/internal/app"
 	"github.com/envpilot/runner/internal/catalog"
 	"github.com/envpilot/runner/internal/config"
@@ -7925,7 +7925,7 @@ func TestBootstrapFullLifecycleAgentHTTPStatusReporterRegisterFetchReportAndRest
 		},
 		PermissionWarnings: []string{"pods list forbidden in shared"},
 	}
-	if err := reporter.ReportResourceScan(context.Background(), cfg, result); err != nil {
+	if err := reporter.ReportResourceScan(context.Background(), cfg, task, result); err != nil {
 		t.Fatalf("report resource scan through HTTPStatusReporter: %v", err)
 	}
 
@@ -7941,7 +7941,7 @@ func TestBootstrapFullLifecycleAgentHTTPStatusReporterRegisterFetchReportAndRest
 	if restartedTask == nil || len(restartedTask.Namespaces) != 1 || restartedTask.Namespaces[0] != "dev-base" {
 		t.Fatalf("unexpected restarted resource scan task: %#v", restartedTask)
 	}
-	if err := restartedReporter.ReportResourceScan(context.Background(), restartedCfg, result); err != nil {
+	if err := restartedReporter.ReportResourceScan(context.Background(), restartedCfg, restartedTask, result); err != nil {
 		t.Fatalf("report resource scan after restart with persisted auth token: %v", err)
 	}
 }

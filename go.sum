@@ -8,6 +8,8 @@ github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ3
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
+github.com/envpilot/agent v0.1.0 h1:b+bTewTLgVJQW7r4ItigLYus5nhek5PbQ2PRjuD8buw=
+github.com/envpilot/agent v0.1.0/go.mod h1:RAp+zFFO6BRUJnkr/qi04ZOtPWVpB5J77OKl/1cVPSE=
 github.com/envpilot/contracts v0.1.0 h1:68jHYxeFRVSpURNnk6B9HbnB9hh7HkY/IVWnESo5Luo=
 github.com/envpilot/contracts v0.1.0/go.mod h1:ztJFSUHQ2Xr1o3aNiEppBD/YBe21DyfR5+KKwvRCVG4=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
