@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 )
 
 var ErrProjectNotFound = errors.New("project not found")

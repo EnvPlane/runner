@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/internal/store"
 )
 

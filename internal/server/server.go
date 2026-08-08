@@ -27,10 +27,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/internal/app"
 	"github.com/envpilot/runner/internal/bootstrap"
 	"github.com/envpilot/runner/internal/config"
-	"github.com/envpilot/runner/internal/domain"
 	"github.com/envpilot/runner/internal/jobs"
 	"github.com/envpilot/runner/internal/scm"
 	"github.com/envpilot/runner/internal/secrets"

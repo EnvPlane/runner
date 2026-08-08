@@ -1,7 +1,7 @@
 package app
 
 import (
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 	"testing"
 )
 

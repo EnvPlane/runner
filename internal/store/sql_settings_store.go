@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 )
 
 type SQLSettingsStore struct {

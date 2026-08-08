@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/internal/app"
-	"github.com/envpilot/runner/internal/domain"
 	"github.com/envpilot/runner/internal/scm"
 	"github.com/envpilot/runner/internal/store"
 )

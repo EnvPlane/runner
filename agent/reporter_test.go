@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 )
 
 func TestHTTPStatusReporterPostsEnvironmentStatus(t *testing.T) {

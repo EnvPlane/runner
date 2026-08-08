@@ -61,8 +61,14 @@ jobs:
           client-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
           private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-          repositories: bootstrap,deploy,frontend
+          repositories: bootstrap,contracts,deploy,frontend
           permission-contents: read
+      - name: Configure private Go modules
+        env:
+          SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+        run: |
+          echo 'GOPRIVATE=github.com/envpilot/*' >> "$GITHUB_ENV"
+          git config --global url."https://x-access-token:${SOURCE_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: actions/checkout@v5
         with:
           repository: envpilot/bootstrap
@@ -116,6 +122,8 @@ jobs:
           labels: ${{ steps.metadata.outputs.labels }}
           cache-from: type=gha,scope=runner
           cache-to: type=gha,mode=max,scope=runner
+          secrets: |
+            github_token=${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           provenance: mode=max
           sbom: true
       - id: published

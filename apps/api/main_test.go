@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/agent"
-	"github.com/envpilot/runner/internal/domain"
 	"github.com/envpilot/runner/internal/orchestrator"
 )
 

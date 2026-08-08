@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/internal/catalog"
 	"github.com/envpilot/runner/internal/config"
-	"github.com/envpilot/runner/internal/domain"
 	"github.com/envpilot/runner/internal/gitops"
 	"github.com/envpilot/runner/internal/orchestrator"
 	"github.com/envpilot/runner/internal/store"

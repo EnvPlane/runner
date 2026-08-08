@@ -13,9 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/internal/app"
 	"github.com/envpilot/runner/internal/bootstrap"
-	"github.com/envpilot/runner/internal/domain"
 )
 
 const runtimeBundleFixedTimestamp = "2026-05-03T00:00:00Z"

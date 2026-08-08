@@ -25,11 +25,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/runner/agent"
 	"github.com/envpilot/runner/internal/app"
 	"github.com/envpilot/runner/internal/catalog"
 	"github.com/envpilot/runner/internal/config"
-	"github.com/envpilot/runner/internal/domain"
 	"github.com/envpilot/runner/internal/gitops"
 	"github.com/envpilot/runner/internal/jobs"
 	"github.com/envpilot/runner/internal/store"

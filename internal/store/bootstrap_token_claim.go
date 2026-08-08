@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 )
 
 func ApplyBootstrapTokenClaim(session domain.BootstrapSession, request BootstrapTokenClaimRequest) (domain.BootstrapSession, error) {

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/envpilot/runner/internal/domain"
+	"github.com/envpilot/contracts/domain"
 )
 
 var ErrNotFound = errors.New("environment not found")
