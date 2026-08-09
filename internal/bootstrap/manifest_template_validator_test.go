@@ -57,10 +57,10 @@ spec:
 	foundPR := false
 	foundCommit := false
 	for _, issue := range result.Issues {
-		if issue.Code == "template.required_variable" && issue.Message == "missing required EnvPilot variable {{ .PRNumber }}" {
+		if issue.Code == "template.required_variable" && issue.Message == "missing required EnvPlane variable {{ .PRNumber }}" {
 			foundPR = true
 		}
-		if issue.Code == "template.required_variable" && issue.Message == "missing required EnvPilot variable {{ .CommitSHA }} for Deployment" {
+		if issue.Code == "template.required_variable" && issue.Message == "missing required EnvPlane variable {{ .CommitSHA }} for Deployment" {
 			foundCommit = true
 		}
 	}

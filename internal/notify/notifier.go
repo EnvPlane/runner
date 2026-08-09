@@ -93,7 +93,7 @@ func slackText(environment domain.Environment) string {
 	if status == "" {
 		status = "unknown"
 	}
-	parts := []string{"EnvPilot", environment.ID, status}
+	parts := []string{"EnvPlane", environment.ID, status}
 	if strings.TrimSpace(environment.URL) != "" {
 		parts = append(parts, environment.URL)
 	}

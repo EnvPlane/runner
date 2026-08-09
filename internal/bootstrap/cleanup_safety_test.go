@@ -20,12 +20,12 @@ func TestValidateCleanupSafetyBlocksProtectedNamespaceTarget(t *testing.T) {
 
 func TestValidateCleanupSafetyRejectsDangerousLabelConfig(t *testing.T) {
 	config := DefaultCleanupSafetyConfig()
-	config.DeleteEnvPilotLabeledOnly = false
+	config.DeleteEnvPlaneLabeledOnly = false
 	err := ValidateCleanupSafetyConfig(config, []string{"envpilot-pr-123"})
 	if err == nil {
 		t.Fatalf("expected labels-only validation error")
 	}
-	if !strings.Contains(err.Error(), "EnvPilot labels") {
+	if !strings.Contains(err.Error(), "EnvPlane labels") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -66,7 +66,7 @@ func TestFilterCleanupEligibleResourcesIgnoresProtectedAndUnlabeled(t *testing.T
 	}
 }
 
-func TestIsEnvPilotManagedRequiresOwnershipLabels(t *testing.T) {
+func TestIsEnvPlaneManagedRequiresOwnershipLabels(t *testing.T) {
 	resource := domain.ResourceSnapshot{
 		Kind:      "Deployment",
 		Namespace: "envpilot-pr-123",
@@ -78,16 +78,16 @@ func TestIsEnvPilotManagedRequiresOwnershipLabels(t *testing.T) {
 			"envpilot.io/environment-id":   "pr-123",
 		},
 	}
-	if !IsEnvPilotManaged(resource, "checkout", "pr-123") {
-		t.Fatalf("expected resource to be EnvPilot-managed")
+	if !IsEnvPlaneManaged(resource, "checkout", "pr-123") {
+		t.Fatalf("expected resource to be EnvPlane-managed")
 	}
-	if IsEnvPilotManaged(resource, "payments", "pr-123") {
+	if IsEnvPlaneManaged(resource, "payments", "pr-123") {
 		t.Fatalf("expected project mismatch to reject resource")
 	}
-	if IsEnvPilotManaged(resource, "checkout", "pr-999") {
+	if IsEnvPlaneManaged(resource, "checkout", "pr-999") {
 		t.Fatalf("expected environment mismatch to reject resource")
 	}
-	if IsEnvPilotManaged(domain.ResourceSnapshot{Kind: "Deployment", Namespace: "envpilot-pr-123", Name: "manual"}, "checkout", "pr-123") {
+	if IsEnvPlaneManaged(domain.ResourceSnapshot{Kind: "Deployment", Namespace: "envpilot-pr-123", Name: "manual"}, "checkout", "pr-123") {
 		t.Fatalf("expected unlabeled resource to be rejected")
 	}
 }
@@ -146,14 +146,14 @@ func TestCleanupDeleteGuardSkipsUnlabeledDeploymentAndSecret(t *testing.T) {
 		t.Fatalf("unlabeled Secret must not be deleted")
 	}
 	if !ShouldDeleteManagedResource(resources[2], config, "checkout", "pr-123") {
-		t.Fatalf("EnvPilot-labeled Deployment should be deleted")
+		t.Fatalf("EnvPlane-labeled Deployment should be deleted")
 	}
 	if !ShouldDeleteManagedResource(resources[3], config, "checkout", "pr-123") {
-		t.Fatalf("EnvPilot-labeled Secret should be deleted")
+		t.Fatalf("EnvPlane-labeled Secret should be deleted")
 	}
 }
 
-func TestApplyGuardRejectsUnlabeledIngressAndAllowsEnvPilotLabeled(t *testing.T) {
+func TestApplyGuardRejectsUnlabeledIngressAndAllowsEnvPlaneLabeled(t *testing.T) {
 	unlabeled := domain.ResourceSnapshot{
 		Kind:      "Ingress",
 		Namespace: "envpilot-pr-123",
@@ -178,7 +178,7 @@ func TestApplyGuardRejectsUnlabeledIngressAndAllowsEnvPilotLabeled(t *testing.T)
 		t.Fatalf("expected unlabeled Ingress modify error")
 	}
 	if !ShouldModifyManagedResource(labeled, "checkout", "pr-123") {
-		t.Fatalf("EnvPilot-labeled Ingress should be modified")
+		t.Fatalf("EnvPlane-labeled Ingress should be modified")
 	}
 	if err := ValidateModifyManagedResource(labeled, "checkout", "pr-123"); err != nil {
 		t.Fatalf("labeled Ingress should pass modify guard: %v", err)

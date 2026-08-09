@@ -1,9 +1,9 @@
 {
   "openapi": "3.0.3",
   "info": {
-    "title": "EnvPilot API",
+    "title": "EnvPlane API",
     "version": "1.0.0",
-    "description": "Control plane API for EnvPilot environments, projects, products, settings and webhook intake."
+    "description": "Control plane API for EnvPlane environments, projects, products, settings and webhook intake."
   },
   "servers": [
     {

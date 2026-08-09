@@ -75,7 +75,7 @@ type Config struct {
 	DependencyWaitInterval       time.Duration
 	AllowUnauthenticatedAgents   bool
 	CleanupProtectedNamespaces   []string
-	CleanupRequireEnvPilotLabels bool
+	CleanupRequireEnvPlaneLabels bool
 }
 
 type runtimeConfigFile struct {
@@ -171,7 +171,7 @@ func FromEnv() Config {
 		DependencyWaitInterval:       time.Duration(getenvInt("ENVPILOT_DEPENDENCY_WAIT_INTERVAL_SECONDS", 2)) * time.Second,
 		AllowUnauthenticatedAgents:   getenvBool("ENVPILOT_ALLOW_UNAUTHENTICATED_AGENTS", false),
 		CleanupProtectedNamespaces:   splitCSV(getenv("ENVPILOT_CLEANUP_PROTECTED_NAMESPACES", "default,kube-system,kube-public,kube-node-lease,flux-system,cert-manager")),
-		CleanupRequireEnvPilotLabels: getenvBool("ENVPILOT_CLEANUP_REQUIRE_ENVPILOT_LABELS", true),
+		CleanupRequireEnvPlaneLabels: getenvBool("ENVPILOT_CLEANUP_REQUIRE_ENVPILOT_LABELS", true),
 		TTLCheckInterval:             time.Duration(getenvInt("ENVPILOT_TTL_CHECK_SECONDS", 60)) * time.Second,
 		JobRetryDelay:                time.Duration(getenvInt("ENVPILOT_JOB_RETRY_SECONDS", 5)) * time.Second,
 		JobMaxAttempts:               getenvInt("ENVPILOT_JOB_MAX_ATTEMPTS", 3),

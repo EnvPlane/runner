@@ -88,7 +88,7 @@ export function validateServiceClassifications(
       errors.push({
         serviceId: service.id,
         code: "missing_classification",
-        message: `${service.name} has no classification. Choose how EnvPilot should handle it.`
+        message: `${service.name} has no classification. Choose how EnvPlane should handle it.`
       });
     }
   }

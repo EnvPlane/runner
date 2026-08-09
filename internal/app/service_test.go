@@ -1417,7 +1417,7 @@ func TestDeleteEnvironmentBlocksProtectedNamespace(t *testing.T) {
 	}
 	cfg := config.FromEnv()
 	cfg.CleanupProtectedNamespaces = []string{"default", "kube-system"}
-	cfg.CleanupRequireEnvPilotLabels = true
+	cfg.CleanupRequireEnvPlaneLabels = true
 	service := NewEnvironmentService(cfg, catalog.Default(), envStore, gitops.NewFluxRenderer(cfg.GitOps), gitops.NewFileWriter(tmp, false, "", ""))
 
 	env, err := service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
@@ -1445,7 +1445,7 @@ func TestDeleteEnvironmentBlocksUnsafeLabelCleanupConfig(t *testing.T) {
 	}
 	cfg := config.FromEnv()
 	cfg.CleanupProtectedNamespaces = []string{"default", "kube-system"}
-	cfg.CleanupRequireEnvPilotLabels = false
+	cfg.CleanupRequireEnvPlaneLabels = false
 	service := NewEnvironmentService(cfg, catalog.Default(), envStore, gitops.NewFluxRenderer(cfg.GitOps), gitops.NewFileWriter(tmp, false, "", ""))
 
 	env, err := service.CreateEnvironment(context.Background(), domain.CreateEnvironmentRequest{
@@ -1459,7 +1459,7 @@ func TestDeleteEnvironmentBlocksUnsafeLabelCleanupConfig(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected unsafe cleanup config error")
 	}
-	if !strings.Contains(err.Error(), "EnvPilot labels") {
+	if !strings.Contains(err.Error(), "EnvPlane labels") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

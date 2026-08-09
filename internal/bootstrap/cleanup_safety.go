@@ -11,15 +11,15 @@ import (
 
 type CleanupSafetyConfig struct {
 	ProtectedNamespaces       []string
-	DeleteEnvPilotLabeledOnly bool
+	DeleteEnvPlaneLabeledOnly bool
 	FinalizerStrategy         string
 }
 
 const (
-	EnvPilotManagedByLabel     = "app.kubernetes.io/managed-by"
-	EnvPilotManagedLabel       = "envpilot.io/managed"
-	EnvPilotProjectLabel       = "envpilot.io/project"
-	EnvPilotEnvironmentIDLabel = "envpilot.io/environment-id"
+	EnvPlaneManagedByLabel     = "app.kubernetes.io/managed-by"
+	EnvPlaneManagedLabel       = "envpilot.io/managed"
+	EnvPlaneProjectLabel       = "envpilot.io/project"
+	EnvPlaneEnvironmentIDLabel = "envpilot.io/environment-id"
 )
 
 var defaultProtectedNamespaces = []string{
@@ -34,7 +34,7 @@ var defaultProtectedNamespaces = []string{
 func DefaultCleanupSafetyConfig() CleanupSafetyConfig {
 	return CleanupSafetyConfig{
 		ProtectedNamespaces:       append([]string{}, defaultProtectedNamespaces...),
-		DeleteEnvPilotLabeledOnly: true,
+		DeleteEnvPlaneLabeledOnly: true,
 		FinalizerStrategy:         "foreground",
 	}
 }
@@ -44,8 +44,8 @@ func ValidateCleanupSafetyConfig(config CleanupSafetyConfig, targetNamespaces []
 	if len(protected) == 0 {
 		return fmt.Errorf("protected namespaces list must not be empty")
 	}
-	if !config.DeleteEnvPilotLabeledOnly {
-		return fmt.Errorf("cleanup must delete only resources with EnvPilot labels")
+	if !config.DeleteEnvPlaneLabeledOnly {
+		return fmt.Errorf("cleanup must delete only resources with EnvPlane labels")
 	}
 	switch normalizeFinalizerStrategy(config.FinalizerStrategy) {
 	case "none", "foreground", "orphan":
@@ -79,7 +79,7 @@ func FilterCleanupEligibleResourcesForEnvironment(resources []domain.ResourceSna
 		if _, ok := protected[strings.TrimSpace(resource.Namespace)]; ok {
 			continue
 		}
-		if config.DeleteEnvPilotLabeledOnly && !IsEnvPilotManaged(resource, projectID, environmentID) {
+		if config.DeleteEnvPlaneLabeledOnly && !IsEnvPlaneManaged(resource, projectID, environmentID) {
 			continue
 		}
 		filtered = append(filtered, resource)
@@ -87,17 +87,17 @@ func FilterCleanupEligibleResourcesForEnvironment(resources []domain.ResourceSna
 	return filtered
 }
 
-func IsEnvPilotManaged(resource domain.ResourceSnapshot, projectID string, environmentID string) bool {
+func IsEnvPlaneManaged(resource domain.ResourceSnapshot, projectID string, environmentID string) bool {
 	labels := resource.Labels
-	if !hasEnvPilotManagedLabel(labels) {
+	if !hasEnvPlaneManagedLabel(labels) {
 		return false
 	}
 	projectID = strings.TrimSpace(projectID)
-	if projectID != "" && strings.TrimSpace(labels[EnvPilotProjectLabel]) != projectID {
+	if projectID != "" && strings.TrimSpace(labels[EnvPlaneProjectLabel]) != projectID {
 		return false
 	}
 	environmentID = strings.TrimSpace(environmentID)
-	if environmentID != "" && strings.TrimSpace(labels[EnvPilotEnvironmentIDLabel]) != environmentID {
+	if environmentID != "" && strings.TrimSpace(labels[EnvPlaneEnvironmentIDLabel]) != environmentID {
 		return false
 	}
 	return true
@@ -107,15 +107,15 @@ func ValidateDeleteManagedResource(resource domain.ResourceSnapshot, config Clea
 	if IsProtectedNamespace(resource.Namespace, config.ProtectedNamespaces) {
 		return fmt.Errorf("protected namespace %q cannot be targeted by cleanup", strings.TrimSpace(resource.Namespace))
 	}
-	if !IsEnvPilotManaged(resource, projectID, environmentID) {
-		return fmt.Errorf("%w: %s %s/%s", ErrResourceNotEnvPilotManaged, strings.TrimSpace(resource.Kind), strings.TrimSpace(resource.Namespace), strings.TrimSpace(resource.Name))
+	if !IsEnvPlaneManaged(resource, projectID, environmentID) {
+		return fmt.Errorf("%w: %s %s/%s", ErrResourceNotEnvPlaneManaged, strings.TrimSpace(resource.Kind), strings.TrimSpace(resource.Namespace), strings.TrimSpace(resource.Name))
 	}
 	return nil
 }
 
 func ValidateModifyManagedResource(existing domain.ResourceSnapshot, projectID string, environmentID string) error {
-	if !IsEnvPilotManaged(existing, projectID, environmentID) {
-		return fmt.Errorf("%w: %s %s/%s", ErrResourceNotEnvPilotManaged, strings.TrimSpace(existing.Kind), strings.TrimSpace(existing.Namespace), strings.TrimSpace(existing.Name))
+	if !IsEnvPlaneManaged(existing, projectID, environmentID) {
+		return fmt.Errorf("%w: %s %s/%s", ErrResourceNotEnvPlaneManaged, strings.TrimSpace(existing.Kind), strings.TrimSpace(existing.Namespace), strings.TrimSpace(existing.Name))
 	}
 	return nil
 }
@@ -167,17 +167,17 @@ func normalizeFinalizerStrategy(value string) string {
 	return trimmed
 }
 
-func hasEnvPilotManagedLabel(labels map[string]string) bool {
+func hasEnvPlaneManagedLabel(labels map[string]string) bool {
 	if labels == nil {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(labels[EnvPilotManagedByLabel]), "envpilot") {
+	if strings.EqualFold(strings.TrimSpace(labels[EnvPlaneManagedByLabel]), "envpilot") {
 		return true
 	}
-	if strings.EqualFold(strings.TrimSpace(labels[EnvPilotManagedLabel]), "true") {
+	if strings.EqualFold(strings.TrimSpace(labels[EnvPlaneManagedLabel]), "true") {
 		return true
 	}
-	return strings.TrimSpace(labels[EnvPilotEnvironmentIDLabel]) != ""
+	return strings.TrimSpace(labels[EnvPlaneEnvironmentIDLabel]) != ""
 }
 
-var ErrResourceNotEnvPilotManaged = errors.New("resource is not managed by EnvPilot")
+var ErrResourceNotEnvPlaneManaged = errors.New("resource is not managed by EnvPlane")

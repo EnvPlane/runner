@@ -41,14 +41,14 @@ func TestKubernetesManagedResourceClientBlocksUnlabeledApplyUpdateAndDeleteForAl
 			defer server.Close()
 
 			client := kubernetesManagedClientForTest(server)
-			if err := client.Apply(context.Background(), resourceSnapshot(kind, "manual", envPilotLabels())); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+			if err := client.Apply(context.Background(), resourceSnapshot(kind, "manual", envPilotLabels())); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 				t.Fatalf("unlabeled existing %s update should be rejected, got %v", kind, err)
 			}
 			if patchCalled {
 				t.Fatalf("unlabeled existing %s was patched", kind)
 			}
 
-			if err := client.Delete(context.Background(), kind, "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+			if err := client.Delete(context.Background(), kind, "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 				t.Fatalf("unlabeled existing %s delete should be rejected, got %v", kind, err)
 			}
 			if deleteCalled {
@@ -58,7 +58,7 @@ func TestKubernetesManagedResourceClientBlocksUnlabeledApplyUpdateAndDeleteForAl
 	}
 }
 
-func TestKubernetesManagedResourceClientAllowsEnvPilotLabeledApplyUpdateAndDeleteForAllRunnerKinds(t *testing.T) {
+func TestKubernetesManagedResourceClientAllowsEnvPlaneLabeledApplyUpdateAndDeleteForAllRunnerKinds(t *testing.T) {
 	for _, kind := range runnerManagedResourceKinds() {
 		t.Run(kind, func(t *testing.T) {
 			paths, err := kubernetesResourcePaths(kind, "envpilot-pr-123", "orders")
@@ -94,23 +94,23 @@ func TestKubernetesManagedResourceClientAllowsEnvPilotLabeledApplyUpdateAndDelet
 
 			client := kubernetesManagedClientForTest(server)
 			if err := client.Apply(context.Background(), resourceSnapshot(kind, "orders", envPilotLabels())); err != nil {
-				t.Fatalf("EnvPilot-labeled existing %s update should be allowed: %v", kind, err)
+				t.Fatalf("EnvPlane-labeled existing %s update should be allowed: %v", kind, err)
 			}
 			if !patchCalled {
-				t.Fatalf("EnvPilot-labeled existing %s was not patched", kind)
+				t.Fatalf("EnvPlane-labeled existing %s was not patched", kind)
 			}
 
 			if err := client.Delete(context.Background(), kind, "envpilot-pr-123", "orders"); err != nil {
-				t.Fatalf("EnvPilot-labeled existing %s delete should be allowed: %v", kind, err)
+				t.Fatalf("EnvPlane-labeled existing %s delete should be allowed: %v", kind, err)
 			}
 			if !deleteCalled {
-				t.Fatalf("EnvPilot-labeled existing %s was not deleted", kind)
+				t.Fatalf("EnvPlane-labeled existing %s was not deleted", kind)
 			}
 		})
 	}
 }
 
-func TestKubernetesManagedResourceClientCreatesNewResourcesWithEnvPilotOwnershipLabelsForAllRunnerKinds(t *testing.T) {
+func TestKubernetesManagedResourceClientCreatesNewResourcesWithEnvPlaneOwnershipLabelsForAllRunnerKinds(t *testing.T) {
 	for _, kind := range runnerManagedResourceKinds() {
 		t.Run(kind, func(t *testing.T) {
 			paths, err := kubernetesResourcePaths(kind, "envpilot-pr-123", "orders")
@@ -138,7 +138,7 @@ func TestKubernetesManagedResourceClientCreatesNewResourcesWithEnvPilotOwnership
 
 			client := kubernetesManagedClientForTest(server)
 			if err := client.Apply(context.Background(), resourceSnapshot(kind, "orders", nil)); err != nil {
-				t.Fatalf("new %s create should be allowed with EnvPilot labels applied: %v", kind, err)
+				t.Fatalf("new %s create should be allowed with EnvPlane labels applied: %v", kind, err)
 			}
 			if !postCalled {
 				t.Fatalf("new %s was not posted", kind)
@@ -173,9 +173,9 @@ func TestKubernetesManagedResourceClientDeleteAlwaysRequiresOwnershipLabelsEvenW
 	client := kubernetesManagedClientForTest(server)
 	client.CleanupSafety = CleanupSafetyConfig{
 		ProtectedNamespaces:       []string{"default"},
-		DeleteEnvPilotLabeledOnly: false,
+		DeleteEnvPlaneLabeledOnly: false,
 	}
-	if err := client.Delete(context.Background(), "Secret", "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+	if err := client.Delete(context.Background(), "Secret", "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 		t.Fatalf("unlabeled existing Secret delete should be rejected regardless of cleanup config, got %v", err)
 	}
 	if deleteCalled {

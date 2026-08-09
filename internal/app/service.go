@@ -291,7 +291,7 @@ func (s *EnvironmentService) validateCleanupSafety(env domain.Environment) error
 	config := bootstrap.DefaultCleanupSafetyConfig()
 	if len(s.cfg.CleanupProtectedNamespaces) > 0 {
 		config.ProtectedNamespaces = s.cfg.CleanupProtectedNamespaces
-		config.DeleteEnvPilotLabeledOnly = s.cfg.CleanupRequireEnvPilotLabels
+		config.DeleteEnvPlaneLabeledOnly = s.cfg.CleanupRequireEnvPlaneLabels
 	}
 	if err := bootstrap.ValidateCleanupSafetyConfig(config, []string{env.Namespace}); err != nil {
 		return ValidationError{Message: fmt.Sprintf("cleanup safety validation failed: %v", err)}
@@ -940,7 +940,7 @@ func (s *EnvironmentService) gitOpsWriterForEnvironment(ctx context.Context, env
 		AuthorName:        s.cfg.GitAuthorName,
 		AuthorEmail:       s.cfg.GitAuthorEmail,
 		CreatePullRequest: branchStrategy == "pull-request",
-		PullRequestTitle:  "EnvPilot " + environment.ID,
+		PullRequestTitle:  "EnvPlane " + environment.ID,
 		PullRequestBody:   "Generated GitOps manifests for " + environment.ID + ".",
 	})
 }

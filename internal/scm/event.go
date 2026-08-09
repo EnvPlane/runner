@@ -158,7 +158,7 @@ func ParseGitHubPRCommand(body []byte) (PullRequestCommand, error) {
 	if event.Action != "created" || event.Issue.PullRequest.URL == "" {
 		return PullRequestCommand{Provider: ProviderGitHub}, nil
 	}
-	command, duration, raw, ok := parseEnvPilotCommand(event.Comment.Body)
+	command, duration, raw, ok := parseEnvPlaneCommand(event.Comment.Body)
 	if !ok {
 		return PullRequestCommand{Provider: ProviderGitHub}, nil
 	}
@@ -187,7 +187,7 @@ func ParseGitLabPRCommand(body []byte) (PullRequestCommand, error) {
 	if event.ObjectKind != "note" || event.MergeRequest.IID == 0 {
 		return PullRequestCommand{Provider: ProviderGitLab}, nil
 	}
-	command, duration, raw, ok := parseEnvPilotCommand(event.ObjectAttributes.Note)
+	command, duration, raw, ok := parseEnvPlaneCommand(event.ObjectAttributes.Note)
 	if !ok {
 		return PullRequestCommand{Provider: ProviderGitLab}, nil
 	}
@@ -265,7 +265,7 @@ func ParseGitLabMergeRequest(body []byte) (PullRequestEvent, error) {
 	}, nil
 }
 
-func parseEnvPilotCommand(body string) (PRCommand, time.Duration, string, bool) {
+func parseEnvPlaneCommand(body string) (PRCommand, time.Duration, string, bool) {
 	for _, line := range strings.Split(body, "\n") {
 		fields := strings.Fields(strings.TrimSpace(line))
 		if len(fields) < 2 || fields[0] != "/envpilot" {

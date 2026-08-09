@@ -1242,7 +1242,7 @@ func TestAuditLogRecordsActorUserHeaderWithoutTokenFingerprint(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
 	req.Header.Set("Authorization", "Bearer readonly-token")
-	req.Header.Set("X-EnvPilot-User", "audit-user")
+	req.Header.Set("X-EnvPlane-User", "audit-user")
 	rec := httptest.NewRecorder()
 	application.Routes().ServeHTTP(rec, req)
 	if rec.Code != http.StatusOK {
@@ -3157,7 +3157,7 @@ func TestBootstrapSessionPersistsCleanupSafetyConfig(t *testing.T) {
 	  "status": "reviewed",
 	  "step_data": {
 	    "cleanupProtectedNamespaces": "default,kube-system,flux-system",
-	    "cleanupDeleteEnvPilotLabelsOnly": true,
+	    "cleanupDeleteEnvPlaneLabelsOnly": true,
 	    "cleanupFinalizerStrategy": "foreground"
 	  }
 	}`)
@@ -3171,7 +3171,7 @@ func TestBootstrapSessionPersistsCleanupSafetyConfig(t *testing.T) {
 	if !strings.Contains(updateRec.Body.String(), `"cleanupProtectedNamespaces":"default,kube-system,flux-system"`) {
 		t.Fatalf("cleanup protected namespaces not persisted: %s", updateRec.Body.String())
 	}
-	if !strings.Contains(updateRec.Body.String(), `"cleanupDeleteEnvPilotLabelsOnly":true`) {
+	if !strings.Contains(updateRec.Body.String(), `"cleanupDeleteEnvPlaneLabelsOnly":true`) {
 		t.Fatalf("labels-only cleanup flag not persisted: %s", updateRec.Body.String())
 	}
 }
@@ -3201,7 +3201,7 @@ func TestBootstrapSessionRejectsProtectedFeatureNamespaceCleanupTarget(t *testin
 	  "step_data": {
 	    "featureNamespaceTemplate": "envpilot-pr-{{ .PRNumber }}",
 	    "cleanupProtectedNamespaces": "default,envpilot-pr-{{ .PRNumber }}",
-	    "cleanupDeleteEnvPilotLabelsOnly": true,
+	    "cleanupDeleteEnvPlaneLabelsOnly": true,
 	    "cleanupFinalizerStrategy": "foreground"
 	  }
 	}`)

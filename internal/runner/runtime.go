@@ -30,7 +30,7 @@ import (
 
 const (
 	runnerCommandAPIVersion       = "1"
-	runnerCommandAPIVersionHeader = "X-EnvPilot-Runner-Command-API-Version"
+	runnerCommandAPIVersionHeader = "X-EnvPlane-Runner-Command-API-Version"
 )
 
 type runnerConfig struct {

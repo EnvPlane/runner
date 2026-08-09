@@ -71,13 +71,13 @@ func (c KubernetesManagedResourceClient) withOwnershipLabels(resource domain.Res
 	if resource.Labels == nil {
 		resource.Labels = map[string]string{}
 	}
-	resource.Labels[EnvPilotManagedByLabel] = "envpilot"
-	resource.Labels[EnvPilotManagedLabel] = "true"
+	resource.Labels[EnvPlaneManagedByLabel] = "envpilot"
+	resource.Labels[EnvPlaneManagedLabel] = "true"
 	if strings.TrimSpace(c.ProjectID) != "" {
-		resource.Labels[EnvPilotProjectLabel] = strings.TrimSpace(c.ProjectID)
+		resource.Labels[EnvPlaneProjectLabel] = strings.TrimSpace(c.ProjectID)
 	}
 	if strings.TrimSpace(c.EnvironmentID) != "" {
-		resource.Labels[EnvPilotEnvironmentIDLabel] = strings.TrimSpace(c.EnvironmentID)
+		resource.Labels[EnvPlaneEnvironmentIDLabel] = strings.TrimSpace(c.EnvironmentID)
 	}
 	return resource
 }
@@ -187,7 +187,7 @@ func (c KubernetesManagedResourceClient) warnUnsafeResourceOperation(operation s
 	if c.Logger == nil {
 		return
 	}
-	c.Logger.Warn("refusing Kubernetes resource operation for non-EnvPilot-managed resource",
+	c.Logger.Warn("refusing Kubernetes resource operation for non-EnvPlane-managed resource",
 		"operation", operation,
 		"kind", resource.Kind,
 		"namespace", resource.Namespace,

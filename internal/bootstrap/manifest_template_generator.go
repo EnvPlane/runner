@@ -98,7 +98,7 @@ func GenerateManifestTemplates(
 		rewriteManifestNamespace(manifest, snapshot.Kind, featureNamespace)
 		rewriteManifestImages(manifest, snapshot.Kind, commitPlaceholder, strings.TrimSpace(options.ImagePattern))
 		rewriteIngressHosts(manifest, snapshot, strings.TrimSpace(options.PreviewDomain), strings.TrimSpace(options.HostPatternTemplate))
-		addEnvPilotMetadata(manifest, options.Labels, options.Annotations)
+		addEnvPlaneMetadata(manifest, options.Labels, options.Annotations)
 
 		yamlText := marshalDeterministicYAML(manifest)
 		rewrittenNamespace := metadataNamespace(manifest, snapshot.Kind, featureNamespace)
@@ -196,7 +196,7 @@ func GenerateResourcePolicyTemplates(
 			},
 		},
 	}
-	addEnvPilotMetadata(resourceQuota, labels, annotations)
+	addEnvPlaneMetadata(resourceQuota, labels, annotations)
 
 	limitRange := map[string]any{
 		"apiVersion": "v1",
@@ -221,7 +221,7 @@ func GenerateResourcePolicyTemplates(
 			},
 		},
 	}
-	addEnvPilotMetadata(limitRange, labels, annotations)
+	addEnvPlaneMetadata(limitRange, labels, annotations)
 
 	return []ManifestTemplate{
 		{
@@ -289,7 +289,7 @@ func GenerateNetworkPolicyTemplates(
 				},
 			},
 		}
-		addEnvPilotMetadata(manifest, labels, annotations)
+		addEnvPlaneMetadata(manifest, labels, annotations)
 		templates = append(templates, ManifestTemplate{
 			Kind:      "NetworkPolicy",
 			Namespace: ns,
@@ -320,7 +320,7 @@ func GenerateNetworkPolicyTemplates(
 		case "deny all":
 			spec["egress"] = []any{}
 		}
-		addEnvPilotMetadata(manifest, labels, annotations)
+		addEnvPlaneMetadata(manifest, labels, annotations)
 		templates = append(templates, ManifestTemplate{
 			Kind:      "NetworkPolicy",
 			Namespace: ns,
@@ -350,7 +350,7 @@ func GenerateNetworkPolicyTemplates(
 					},
 				},
 			}
-			addEnvPilotMetadata(manifest, labels, annotations)
+			addEnvPlaneMetadata(manifest, labels, annotations)
 			templates = append(templates, ManifestTemplate{
 				Kind:      "NetworkPolicy",
 				Namespace: baseNamespace,
@@ -629,7 +629,7 @@ func sanitizeHostLabel(label string) string {
 	return value
 }
 
-func addEnvPilotMetadata(manifest map[string]any, labels map[string]string, annotations map[string]string) {
+func addEnvPlaneMetadata(manifest map[string]any, labels map[string]string, annotations map[string]string) {
 	metadata := ensureStringAnyMap(manifest, "metadata")
 	manifestLabels := ensureNestedStringMap(metadata, "labels")
 	manifestAnnotations := ensureNestedStringMap(metadata, "annotations")

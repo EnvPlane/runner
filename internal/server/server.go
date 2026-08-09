@@ -1105,7 +1105,7 @@ func (s *Server) projectAccessUser(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	if user := strings.TrimSpace(r.Header.Get("X-EnvPilot-User")); user != "" {
+	if user := strings.TrimSpace(r.Header.Get("X-EnvPlane-User")); user != "" {
 		return user
 	}
 	if session, ok := s.parseOAuthSession(extractTokenFromRequest(r)); ok {
@@ -1118,7 +1118,7 @@ func (s *Server) projectAccessOrganization(r *http.Request) string {
 	if r == nil {
 		return ""
 	}
-	if org := strings.TrimSpace(r.Header.Get("X-EnvPilot-Org")); org != "" {
+	if org := strings.TrimSpace(r.Header.Get("X-EnvPlane-Org")); org != "" {
 		return org
 	}
 	if session, ok := s.parseOAuthSession(extractTokenFromRequest(r)); ok {
@@ -1265,7 +1265,7 @@ func (s *Server) auditActor(r *http.Request, role apiRole) (actorType, actorID, 
 	if role == apiRole("") || role == "public" {
 		return auditActorAnonymous, "", ""
 	}
-	user := strings.TrimSpace(r.Header.Get("X-EnvPilot-User"))
+	user := strings.TrimSpace(r.Header.Get("X-EnvPlane-User"))
 	if user != "" {
 		return auditActorUser, user, user
 	}
@@ -1320,7 +1320,7 @@ func extractTokenFromRequest(r *http.Request) string {
 	if cookie, err := r.Cookie(apiSessionCookieName); err == nil {
 		return strings.TrimSpace(cookie.Value)
 	}
-	return strings.TrimSpace(r.Header.Get("X-EnvPilot-Token"))
+	return strings.TrimSpace(r.Header.Get("X-EnvPlane-Token"))
 }
 
 func (s *Server) checkRateLimit(r *http.Request) (bool, time.Duration) {
@@ -3761,7 +3761,7 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("invalid request body: %w", err))
 		return
 	}
-	saved, err := s.settings.SaveSettings(settings, r.Header.Get("X-EnvPilot-User"))
+	saved, err := s.settings.SaveSettings(settings, r.Header.Get("X-EnvPlane-User"))
 	if err != nil {
 		writeMappedError(w, err)
 		return
@@ -6199,9 +6199,9 @@ func bootstrapCleanupSafetyFromData(data map[string]any) (bootstrap.CleanupSafet
 		protected = commaSeparatedStrings(asString(source["protected_namespaces"]))
 	}
 
-	labelsOnly, hasLabelsOnly := optionalBoolAny(source["cleanupDeleteEnvPilotLabelsOnly"])
+	labelsOnly, hasLabelsOnly := optionalBoolAny(source["cleanupDeleteEnvPlaneLabelsOnly"])
 	if !hasLabelsOnly {
-		labelsOnly, hasLabelsOnly = optionalBoolAny(source["deleteEnvPilotLabeledOnly"])
+		labelsOnly, hasLabelsOnly = optionalBoolAny(source["deleteEnvPlaneLabeledOnly"])
 	}
 	if !hasLabelsOnly {
 		labelsOnly, hasLabelsOnly = optionalBoolAny(source["delete_envpilot_labeled_only"])
@@ -6220,7 +6220,7 @@ func bootstrapCleanupSafetyFromData(data map[string]any) (bootstrap.CleanupSafet
 		config.ProtectedNamespaces = protected
 	}
 	if hasLabelsOnly {
-		config.DeleteEnvPilotLabeledOnly = labelsOnly
+		config.DeleteEnvPlaneLabeledOnly = labelsOnly
 	}
 	if finalizerStrategy != "" {
 		config.FinalizerStrategy = finalizerStrategy

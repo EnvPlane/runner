@@ -103,7 +103,7 @@ func BuildEnvironmentComment(environment domain.Environment) string {
 	displayStatus := displayStatus(status)
 	headlineStatus := strings.ToLower(displayStatus)
 	lines := []string{
-		"EnvPilot preview environment",
+		"EnvPlane preview environment",
 		"",
 		"Environment " + headlineStatus + ": " + strings.TrimSpace(environment.URL),
 		"Status: " + displayStatus,

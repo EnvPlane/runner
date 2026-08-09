@@ -29,25 +29,25 @@ func TestManagedResourceRuntimeBlocksUnlabeledApplyUpdateAndDeleteForAllRunnerKi
 				"pr-123",
 			)
 
-			if err := runtime.Apply(resourceSnapshot(kind, "new-manual", nil)); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+			if err := runtime.Apply(resourceSnapshot(kind, "new-manual", nil)); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 				t.Fatalf("unlabeled %s create should be rejected, got %v", kind, err)
 			}
 			if _, ok := runtime.Get(kind, "envpilot-pr-123", "new-manual"); ok {
 				t.Fatalf("unlabeled %s was created", kind)
 			}
 
-			if err := runtime.Apply(resourceSnapshot(kind, "manual", envPilotLabels())); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+			if err := runtime.Apply(resourceSnapshot(kind, "manual", envPilotLabels())); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 				t.Fatalf("unlabeled existing %s update should be rejected, got %v", kind, err)
 			}
 			existing, ok := runtime.Get(kind, "envpilot-pr-123", "manual")
 			if !ok {
 				t.Fatalf("manual %s disappeared", kind)
 			}
-			if existing.Labels[EnvPilotManagedLabel] == "true" {
+			if existing.Labels[EnvPlaneManagedLabel] == "true" {
 				t.Fatalf("unlabeled existing %s was modified", kind)
 			}
 
-			if err := runtime.Delete(kind, "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPilotManaged) {
+			if err := runtime.Delete(kind, "envpilot-pr-123", "manual"); !errors.Is(err, ErrResourceNotEnvPlaneManaged) {
 				t.Fatalf("unlabeled existing %s delete should be rejected, got %v", kind, err)
 			}
 			if _, ok := runtime.Get(kind, "envpilot-pr-123", "manual"); !ok {
@@ -57,7 +57,7 @@ func TestManagedResourceRuntimeBlocksUnlabeledApplyUpdateAndDeleteForAllRunnerKi
 	}
 }
 
-func TestManagedResourceRuntimeAllowsEnvPilotLabeledApplyUpdateAndDeleteForAllRunnerKinds(t *testing.T) {
+func TestManagedResourceRuntimeAllowsEnvPlaneLabeledApplyUpdateAndDeleteForAllRunnerKinds(t *testing.T) {
 	kinds := []string{
 		"Deployment",
 		"Service",
@@ -75,30 +75,30 @@ func TestManagedResourceRuntimeAllowsEnvPilotLabeledApplyUpdateAndDeleteForAllRu
 			runtime := NewManagedResourceRuntime(nil, config, "checkout", "pr-123")
 
 			if err := runtime.Apply(resourceSnapshot(kind, "orders", envPilotLabels())); err != nil {
-				t.Fatalf("EnvPilot-labeled %s create should be allowed: %v", kind, err)
+				t.Fatalf("EnvPlane-labeled %s create should be allowed: %v", kind, err)
 			}
 			if _, ok := runtime.Get(kind, "envpilot-pr-123", "orders"); !ok {
-				t.Fatalf("EnvPilot-labeled %s was not created", kind)
+				t.Fatalf("EnvPlane-labeled %s was not created", kind)
 			}
 
 			updated := resourceSnapshot(kind, "orders", envPilotLabels())
 			updated.Annotations = map[string]string{"envpilot.io/test-update": "true"}
 			if err := runtime.Apply(updated); err != nil {
-				t.Fatalf("EnvPilot-labeled %s update should be allowed: %v", kind, err)
+				t.Fatalf("EnvPlane-labeled %s update should be allowed: %v", kind, err)
 			}
 			existing, ok := runtime.Get(kind, "envpilot-pr-123", "orders")
 			if !ok {
-				t.Fatalf("EnvPilot-labeled %s disappeared", kind)
+				t.Fatalf("EnvPlane-labeled %s disappeared", kind)
 			}
 			if existing.Annotations["envpilot.io/test-update"] != "true" {
-				t.Fatalf("EnvPilot-labeled %s was not updated: %+v", kind, existing)
+				t.Fatalf("EnvPlane-labeled %s was not updated: %+v", kind, existing)
 			}
 
 			if err := runtime.Delete(kind, "envpilot-pr-123", "orders"); err != nil {
-				t.Fatalf("EnvPilot-labeled %s delete should be allowed: %v", kind, err)
+				t.Fatalf("EnvPlane-labeled %s delete should be allowed: %v", kind, err)
 			}
 			if _, ok := runtime.Get(kind, "envpilot-pr-123", "orders"); ok {
-				t.Fatalf("EnvPilot-labeled %s was not deleted", kind)
+				t.Fatalf("EnvPlane-labeled %s was not deleted", kind)
 			}
 		})
 	}
@@ -115,9 +115,9 @@ func resourceSnapshot(kind string, name string, labels map[string]string) domain
 
 func envPilotLabels() map[string]string {
 	return map[string]string{
-		EnvPilotManagedByLabel:     "envpilot",
-		EnvPilotManagedLabel:       "true",
-		EnvPilotProjectLabel:       "checkout",
-		EnvPilotEnvironmentIDLabel: "pr-123",
+		EnvPlaneManagedByLabel:     "envpilot",
+		EnvPlaneManagedLabel:       "true",
+		EnvPlaneProjectLabel:       "checkout",
+		EnvPlaneEnvironmentIDLabel: "pr-123",
 	}
 }

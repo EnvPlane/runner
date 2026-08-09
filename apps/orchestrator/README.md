@@ -1,4 +1,4 @@
-# EnvPilot Orchestrator App
+# EnvPlane Orchestrator App
 
 Boundary for the future standalone environment orchestration worker.
 

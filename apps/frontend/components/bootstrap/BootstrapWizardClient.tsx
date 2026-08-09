@@ -262,7 +262,7 @@ type WizardValues = {
   networkBaseToFeature: boolean;
   networkEgressMode: NetworkEgressMode;
   cleanupProtectedNamespaces: string;
-  cleanupDeleteEnvPilotLabelsOnly: boolean;
+  cleanupDeleteEnvPlaneLabelsOnly: boolean;
   cleanupFinalizerStrategy: CleanupFinalizerStrategy;
   authMethod: AuthMethod;
   deploymentBackend: DeploymentBackend;
@@ -392,7 +392,7 @@ const sanitizeStepData = (values: WizardValues): Record<string, any> => ({
   networkBaseToFeature: values.networkBaseToFeature,
   networkEgressMode: values.networkEgressMode,
   cleanupProtectedNamespaces: values.cleanupProtectedNamespaces,
-  cleanupDeleteEnvPilotLabelsOnly: values.cleanupDeleteEnvPilotLabelsOnly,
+  cleanupDeleteEnvPlaneLabelsOnly: values.cleanupDeleteEnvPlaneLabelsOnly,
   cleanupFinalizerStrategy: values.cleanupFinalizerStrategy,
   authMethod: values.authMethod,
   deployment: {
@@ -456,7 +456,7 @@ const sanitizeValuesForStorage = (values: WizardValues): Record<string, string |
   networkBaseToFeature: String(values.networkBaseToFeature),
   networkEgressMode: values.networkEgressMode,
   cleanupProtectedNamespaces: values.cleanupProtectedNamespaces,
-  cleanupDeleteEnvPilotLabelsOnly: String(values.cleanupDeleteEnvPilotLabelsOnly),
+  cleanupDeleteEnvPlaneLabelsOnly: String(values.cleanupDeleteEnvPlaneLabelsOnly),
   cleanupFinalizerStrategy: values.cleanupFinalizerStrategy,
   authMethod: values.authMethod,
   gitOpsOutputPath: values.gitOpsOutputPath,
@@ -728,8 +728,8 @@ const cleanupSafetyValidationMessage = (values: WizardValues): string => {
   if (protectedNamespaces.length === 0) {
     return "Protected namespaces list must not be empty.";
   }
-  if (!values.cleanupDeleteEnvPilotLabelsOnly) {
-    return "Cleanup must delete only resources with EnvPilot labels.";
+  if (!values.cleanupDeleteEnvPlaneLabelsOnly) {
+    return "Cleanup must delete only resources with EnvPlane labels.";
   }
   if (!cleanupFinalizerStrategies.includes(values.cleanupFinalizerStrategy)) {
     return "Select cleanup finalizer strategy.";
@@ -771,7 +771,7 @@ export function BootstrapWizardClient({ projectId }: BootstrapWizardClientProps)
     networkBaseToFeature: false,
     networkEgressMode: "restricted",
     cleanupProtectedNamespaces: "default,kube-system,kube-public,kube-node-lease,flux-system,cert-manager",
-    cleanupDeleteEnvPilotLabelsOnly: true,
+    cleanupDeleteEnvPlaneLabelsOnly: true,
     cleanupFinalizerStrategy: "foreground",
     authMethod: "OAuth",
     deploymentBackend: "helm_direct",
@@ -1805,7 +1805,7 @@ export function BootstrapWizardClient({ projectId }: BootstrapWizardClientProps)
     const cleanupProtectedNamespaces = Array.isArray(cleanupProtectedRaw)
       ? cleanupProtectedRaw.map((item) => asString(item)).filter((item) => item !== "").join(",")
       : asString(cleanupProtectedRaw) || "default,kube-system,kube-public,kube-node-lease,flux-system,cert-manager";
-    const cleanupDeleteEnvPilotLabelsOnlyRaw = asOptionalBoolean(rawValues.cleanupDeleteEnvPilotLabelsOnly ?? rawValues.deleteEnvPilotLabeledOnly ?? rawValues.delete_envpilot_labeled_only);
+    const cleanupDeleteEnvPlaneLabelsOnlyRaw = asOptionalBoolean(rawValues.cleanupDeleteEnvPlaneLabelsOnly ?? rawValues.deleteEnvPlaneLabeledOnly ?? rawValues.delete_envpilot_labeled_only);
     const cleanupFinalizerStrategyRaw = asString(rawValues.cleanupFinalizerStrategy) || asString(rawValues.finalizerStrategy) || asString(rawValues.finalizer_strategy);
     const cleanupFinalizerStrategy: CleanupFinalizerStrategy = cleanupFinalizerStrategies.includes(cleanupFinalizerStrategyRaw as CleanupFinalizerStrategy)
       ? (cleanupFinalizerStrategyRaw as CleanupFinalizerStrategy)
@@ -1970,7 +1970,7 @@ export function BootstrapWizardClient({ projectId }: BootstrapWizardClientProps)
       networkBaseToFeature: networkBaseToFeatureRaw ?? false,
       networkEgressMode,
       cleanupProtectedNamespaces,
-      cleanupDeleteEnvPilotLabelsOnly: cleanupDeleteEnvPilotLabelsOnlyRaw ?? true,
+      cleanupDeleteEnvPlaneLabelsOnly: cleanupDeleteEnvPlaneLabelsOnlyRaw ?? true,
       cleanupFinalizerStrategy,
       scmProvider,
       authMethod,
@@ -3522,12 +3522,12 @@ export function BootstrapWizardClient({ projectId }: BootstrapWizardClientProps)
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                 <input
                   type="checkbox"
-                  checked={values.cleanupDeleteEnvPilotLabelsOnly}
+                  checked={values.cleanupDeleteEnvPlaneLabelsOnly}
                   onChange={(event) => {
-                    updateValue({ cleanupDeleteEnvPilotLabelsOnly: event.target.checked });
+                    updateValue({ cleanupDeleteEnvPlaneLabelsOnly: event.target.checked });
                   }}
                 />
-                Delete only resources with EnvPilot labels
+                Delete only resources with EnvPlane labels
               </label>
               <label>
                 Finalizer strategy
@@ -4410,7 +4410,7 @@ export function BootstrapWizardClient({ projectId }: BootstrapWizardClientProps)
             <div><strong>Templates:</strong> generated {manifestTemplates.length} | edited {Object.keys(editedTemplateYAML).length}</div>
             <div><strong>Policies:</strong> TTL {values.defaultTTLHours}h, cpu {values.cpuRequest}/{values.cpuLimit}, memory {values.memoryRequest}/{values.memoryLimit}, storage {values.storageQuota}, max envs {values.maxActiveEnvironments}</div>
             <div><strong>Network policy:</strong> feature to base {values.networkFeatureToBase ? "yes" : "no"}, base to feature {values.networkBaseToFeature ? "yes" : "no"}, egress {values.networkEgressMode}</div>
-            <div><strong>Cleanup safety:</strong> protected {values.cleanupProtectedNamespaces}, labels only {values.cleanupDeleteEnvPilotLabelsOnly ? "yes" : "no"}, finalizer {values.cleanupFinalizerStrategy}</div>
+            <div><strong>Cleanup safety:</strong> protected {values.cleanupProtectedNamespaces}, labels only {values.cleanupDeleteEnvPlaneLabelsOnly ? "yes" : "no"}, finalizer {values.cleanupFinalizerStrategy}</div>
             {reviewBlockingErrors.length > 0 ? (
               <div style={{ color: "#b42318", fontSize: "0.9rem", marginTop: "0.75rem" }}>
                 <strong>Blocking errors</strong>

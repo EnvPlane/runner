@@ -129,7 +129,7 @@ func validateTemplateVariables(file string, kind string, yamlBody string) []Mani
 				File:    file,
 				Line:    lineOfFirst(yamlBody, expression),
 				Code:    "template.variable",
-				Message: fmt.Sprintf("unsupported EnvPilot variable %q", name),
+				Message: fmt.Sprintf("unsupported EnvPlane variable %q", name),
 			})
 		}
 	}
@@ -139,7 +139,7 @@ func validateTemplateVariables(file string, kind string, yamlBody string) []Mani
 			File:    file,
 			Line:    1,
 			Code:    "template.required_variable",
-			Message: "missing required EnvPilot variable {{ .PRNumber }}",
+			Message: "missing required EnvPlane variable {{ .PRNumber }}",
 		})
 	}
 	if strings.EqualFold(strings.TrimSpace(kind), "Deployment") && !hasCommitSHA {
@@ -147,7 +147,7 @@ func validateTemplateVariables(file string, kind string, yamlBody string) []Mani
 			File:    file,
 			Line:    1,
 			Code:    "template.required_variable",
-			Message: "missing required EnvPilot variable {{ .CommitSHA }} for Deployment",
+			Message: "missing required EnvPlane variable {{ .CommitSHA }} for Deployment",
 		})
 	}
 	return issues
