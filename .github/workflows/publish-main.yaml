@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   publish:
-    if: github.repository == 'envpilot/runner' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    if: github.repository == 'EnvPlane/runner' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     outputs:
       component: ${{ steps.published.outputs.component }}
@@ -72,19 +72,19 @@ jobs:
           git config --global url."https://x-access-token:${SOURCE_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: actions/checkout@v5
         with:
-          repository: envpilot/bootstrap
+          repository: EnvPlane/bootstrap
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: bootstrap
           ref: main
       - uses: actions/checkout@v5
         with:
-          repository: envpilot/deploy
+          repository: EnvPlane/deploy
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: deploy
           ref: main
       - uses: actions/checkout@v5
         with:
-          repository: envpilot/frontend
+          repository: EnvPlane/frontend
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: frontend
           ref: main
@@ -106,7 +106,7 @@ jobs:
       - id: metadata
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/runner
+          images: ghcr.io/envpilot/runner
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -131,7 +131,7 @@ jobs:
         name: Emit immutable image metadata
         env:
           COMPONENT: runner
-          REPOSITORY: ghcr.io/${{ github.repository_owner }}/runner
+          REPOSITORY: ghcr.io/envpilot/runner
           TAG: sha-${{ github.sha }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
