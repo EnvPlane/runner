@@ -145,10 +145,22 @@ func TestRunnerControlPlaneHTTPClientTrustsMountedPrivateCA(t *testing.T) {
 	}
 }
 
-func TestNextRunnerCommandRequiresCompatibilityResponseHeader(t *testing.T) {
+func TestNextRunnerCommandRetriesNoContentWithoutCompatibilityResponseHeader(t *testing.T) {
 	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: http.StatusNoContent, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("")), Request: request}, nil
+	})}
+	_, _, err := nextRunnerCommand(context.Background(), cfg, client)
+	var probe runnerCommandVersionProbeError
+	if err == nil || !errors.As(err, &probe) || isRunnerCommandAPIIncompatible(err) {
+		t.Fatalf("nextRunnerCommand error = %v, want retryable version probe error", err)
+	}
+}
+
+func TestNextRunnerCommandRejectsCommandWithoutCompatibilityResponseHeader(t *testing.T) {
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth"}
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"id":"unsafe-command"}`)), Request: request}, nil
 	})}
 	_, _, err := nextRunnerCommand(context.Background(), cfg, client)
 	if err == nil || !isRunnerCommandAPIIncompatible(err) {

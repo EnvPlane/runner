@@ -628,6 +628,18 @@ func (e runnerCommandCompatibilityError) Error() string {
 	return "command polling API compatibility failure: " + e.detail
 }
 
+// runnerCommandVersionProbeError is deliberately retryable. During a rolling
+// control-plane upgrade a new Runner can observe a no-content queue response
+// from the previous control-plane revision before the new revision is ready.
+// There is no command to execute in that response, so retrying cannot weaken
+// the version gate. A response which contains a command still requires the
+// exact version header and remains a deterministic incompatibility.
+type runnerCommandVersionProbeError struct{ detail string }
+
+func (e runnerCommandVersionProbeError) Error() string {
+	return "command polling API version probe failed: " + e.detail
+}
+
 type runnerCommandAuthenticationError struct{ detail string }
 
 func (e runnerCommandAuthenticationError) Error() string {
@@ -703,7 +715,7 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 	defer resp.Body.Close()
 	if resp.StatusCode == http.StatusNoContent {
 		if err := validateRunnerCommandAPIResponse(resp); err != nil {
-			return domain.RunnerCommand{}, false, err
+			return domain.RunnerCommand{}, false, runnerCommandVersionProbeError{detail: err.Error()}
 		}
 		return domain.RunnerCommand{}, false, nil
 	}
