@@ -1,21 +1,44 @@
-# EnvPilot Runner
+# EnvPlane Runner
 
-Standalone target-cluster execution runtime for EnvPilot.
+Target-cluster execution runtime for [EnvPlane](https://envplane.dev). The
+runner performs explicitly authorized Helm lifecycle operations and reports
+bounded results to the control plane.
 
-## Run
+## Responsibilities
+
+- Register with the control plane and emit authenticated heartbeats.
+- Poll the versioned runner command API.
+- Execute authorized Helm operations in approved namespaces.
+- Report execution results over HTTPS.
+- Run connectivity preflight checks during installation.
+
+Redis remains an internal control-plane queue and is never exposed directly to
+the runner.
+
+## Development
 
 ```bash
 go run ./cmd/envpilot-runner
+go test ./...
+go build ./...
+docker build -t envplane-runner:dev .
 ```
 
-The process registers with control-plane, emits authenticated heartbeats,
-polls the versioned Runner command API, executes Helm lifecycle operations in
-explicitly authorized namespaces, and reports each result over HTTP. Redis is
-an internal control-plane queue and is intentionally not exposed to Runner.
+The `runner` compatibility argument and `runner-connectivity-check` support
+safe upgrades of existing Helm releases.
 
-The legacy `apps/api runner` entrypoint has been removed. The binary accepts a
-temporary no-op `runner` argument for safe upgrades of older Helm releases and
-supports `runner-connectivity-check` for the chart preflight init container.
+## Related components
 
-Runtime identity recovery and remote endpoint requirements are documented in
-the canonical deploy repository's remote-cluster guide.
+- [Control Plane](https://github.com/EnvPlane/control-plane)
+- [Agent](https://github.com/EnvPlane/agent)
+- [Contracts](https://github.com/EnvPlane/contracts)
+- [Deploy](https://github.com/EnvPlane/deploy)
+
+## Security
+
+Inject short-lived credentials through managed Kubernetes Secrets. Never commit
+tokens, kubeconfigs, cloud credentials, or unrestricted namespace permissions.
+
+## Status
+
+Private EnvPlane platform component under active development.
