@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -44,6 +45,29 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
 	return f(request)
+}
+
+func runLocalHTTPTestServer(t *testing.T, handler http.Handler) (string, func()) {
+	t.Helper()
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen tcp4 for test server: %v", err)
+	}
+	server := &http.Server{Handler: handler}
+	done := make(chan error, 1)
+	go func() {
+		done <- server.Serve(listener)
+		close(done)
+	}()
+	closeServer := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			_ = listener.Close()
+		}
+		<-done
+	}
+	return "http://" + listener.Addr().String(), closeServer
 }
 
 func TestNextRunnerCommandClassifiesEndpointAndAuthenticationFailures(t *testing.T) {
@@ -142,6 +166,58 @@ func TestRunnerControlPlaneHTTPClientTrustsMountedPrivateCA(t *testing.T) {
 	defer response.Body.Close()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("private-CA runner health status=%d", response.StatusCode)
+	}
+}
+
+func TestRunnerConnectivityCheckWithRetrySucceedsAfterTransientFailure(t *testing.T) {
+	attempts := 0
+	serverURL, closeServer := runLocalHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		if attempts < 2 {
+			http.Error(w, "not ready", http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer closeServer()
+
+	cfg := runnerConfig{
+		ControlPlaneURL:                      serverURL,
+		ControlPlaneCAFile:                   "",
+		ControlPlaneTLSServerName:            "",
+		ControlPlaneConnectivityMaxAttempts:  3,
+		ControlPlaneConnectivityInitialDelay: 100 * time.Millisecond,
+		ControlPlaneConnectivityMaxDelay:     100 * time.Millisecond,
+		ReportTimeout:                        500 * time.Millisecond,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := runnerConnectivityCheckWithRetry(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), cfg); err != nil {
+		t.Fatalf("runner connectivity retry should recover after transient failure: %v", err)
+	}
+	if attempts < 2 {
+		t.Fatalf("expected retry before success, got attempts=%d", attempts)
+	}
+}
+
+func TestRunnerConnectivityCheckWithRetryTimesOutWhenControlPlaneUnavailable(t *testing.T) {
+	serverURL, closeServer := runLocalHTTPTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer closeServer()
+
+	cfg := runnerConfig{
+		ControlPlaneURL:                      serverURL,
+		ControlPlaneCAFile:                   "",
+		ControlPlaneTLSServerName:            "",
+		ControlPlaneConnectivityMaxAttempts:  5,
+		ControlPlaneConnectivityInitialDelay: 2 * time.Second,
+		ControlPlaneConnectivityMaxDelay:     2 * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+	if err := runnerConnectivityCheckWithRetry(ctx, slog.New(slog.NewTextHandler(io.Discard, nil)), cfg); err == nil || !strings.Contains(strings.ToLower(err.Error()), "context deadline") {
+		t.Fatalf("expected context deadline failure, got %v", err)
 	}
 }
 

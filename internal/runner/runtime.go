@@ -34,27 +34,31 @@ const (
 )
 
 type runnerConfig struct {
-	ControlPlaneURL            string
-	ControlPlaneEndpointMode   string
-	ControlPlaneCAFile         string
-	ControlPlaneTLSServerName  string
-	RemoteGeneration           int64
-	ProjectID                  string
-	ClusterID                  string
-	RunnerID                   string
-	RunnerNamespace            string
-	DeploymentMode             string
-	RegistrationToken          string
-	RunnerAuthToken            string
-	RunnerAuthTokenFile        string
-	ProjectConfigURL           string
-	ProjectConfigToken         string
-	HeartbeatInterval          time.Duration
-	ReportTimeout              time.Duration
-	HealthAddr                 string
-	RunnerVersion              string
-	FeatureEnvWriterMode       string
-	FeatureEnvWriterNamespaces []string
+	ControlPlaneURL                      string
+	ControlPlaneEndpointMode             string
+	ControlPlaneCAFile                   string
+	ControlPlaneTLSServerName            string
+	ControlPlaneConnectivityMaxAttempts  int
+	ControlPlaneConnectivityInitialDelay time.Duration
+	ControlPlaneConnectivityMaxDelay     time.Duration
+	ControlPlaneConnectivityDeadline     time.Duration
+	RemoteGeneration                     int64
+	ProjectID                            string
+	ClusterID                            string
+	RunnerID                             string
+	RunnerNamespace                      string
+	DeploymentMode                       string
+	RegistrationToken                    string
+	RunnerAuthToken                      string
+	RunnerAuthTokenFile                  string
+	ProjectConfigURL                     string
+	ProjectConfigToken                   string
+	HeartbeatInterval                    time.Duration
+	ReportTimeout                        time.Duration
+	HealthAddr                           string
+	RunnerVersion                        string
+	FeatureEnvWriterMode                 string
+	FeatureEnvWriterNamespaces           []string
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -73,27 +77,31 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	return runnerConfig{
-		ControlPlaneURL:            strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
-		ControlPlaneEndpointMode:   strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
-		ControlPlaneCAFile:         getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
-		ControlPlaneTLSServerName:  getenv("ENVPILOT_CONTROL_PLANE_TLS_SERVER_NAME", ""),
-		RemoteGeneration:           int64(getenvInt("ENVPILOT_REMOTE_GENERATION", 0)),
-		ProjectID:                  getenv("ENVPILOT_PROJECT_ID", ""),
-		ClusterID:                  getenv("ENVPILOT_CLUSTER_ID", "default"),
-		RunnerID:                   getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
-		RunnerNamespace:            getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
-		DeploymentMode:             strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
-		RegistrationToken:          registrationToken,
-		RunnerAuthToken:            authToken,
-		RunnerAuthTokenFile:        authTokenFile,
-		ProjectConfigURL:           getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
-		ProjectConfigToken:         getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
-		HeartbeatInterval:          time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
-		ReportTimeout:              time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
-		HealthAddr:                 getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
-		RunnerVersion:              getenv("ENVPILOT_RUNNER_VERSION", "dev"),
-		FeatureEnvWriterMode:       strings.TrimSpace(getenv("ENVPILOT_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
-		FeatureEnvWriterNamespaces: normalizeRunnerNamespaceList(getenv("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES", "")),
+		ControlPlaneURL:                      strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
+		ControlPlaneEndpointMode:             strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
+		ControlPlaneCAFile:                   getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
+		ControlPlaneTLSServerName:            getenv("ENVPILOT_CONTROL_PLANE_TLS_SERVER_NAME", ""),
+		ControlPlaneConnectivityMaxAttempts:  getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_MAX_ATTEMPTS", 12),
+		ControlPlaneConnectivityInitialDelay: time.Duration(getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_INITIAL_BACKOFF_SECONDS", 1)) * time.Second,
+		ControlPlaneConnectivityMaxDelay:     time.Duration(getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_MAX_BACKOFF_SECONDS", 5)) * time.Second,
+		ControlPlaneConnectivityDeadline:     time.Duration(maxInt(5, getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_DEADLINE_SECONDS", 120))) * time.Second,
+		RemoteGeneration:                     int64(getenvInt("ENVPILOT_REMOTE_GENERATION", 0)),
+		ProjectID:                            getenv("ENVPILOT_PROJECT_ID", ""),
+		ClusterID:                            getenv("ENVPILOT_CLUSTER_ID", "default"),
+		RunnerID:                             getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
+		RunnerNamespace:                      getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
+		DeploymentMode:                       strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
+		RegistrationToken:                    registrationToken,
+		RunnerAuthToken:                      authToken,
+		RunnerAuthTokenFile:                  authTokenFile,
+		ProjectConfigURL:                     getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
+		ProjectConfigToken:                   getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
+		HeartbeatInterval:                    time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
+		ReportTimeout:                        time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
+		HealthAddr:                           getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
+		RunnerVersion:                        getenv("ENVPILOT_RUNNER_VERSION", "dev"),
+		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPILOT_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
+		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES", "")),
 	}
 }
 
@@ -251,29 +259,81 @@ func ConnectivityCheck(logger *slog.Logger) {
 		logger.Error("runner control-plane connectivity check failed", "error", err)
 		os.Exit(1)
 	}
-	client, err := newRunnerControlPlaneHTTPClientWithTLS(cfg.ReportTimeout, cfg.ControlPlaneCAFile, cfg.ControlPlaneTLSServerName)
-	if err != nil {
-		logger.Error("runner control-plane connectivity check failed", "error", err)
-		os.Exit(1)
+	deadline := cfg.ControlPlaneConnectivityDeadline
+	if deadline < 5*time.Second {
+		deadline = 5 * time.Second
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.ReportTimeout)
+	if deadline > 10*time.Minute {
+		deadline = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ControlPlaneURL, "/")+"/api/v1/health", nil)
-	if err != nil {
-		logger.Error("runner control-plane connectivity check failed", "error", err)
-		os.Exit(1)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		logger.Error("runner control-plane connectivity check failed", "error", fmt.Errorf("endpoint_unreachable: %w", err))
-		os.Exit(1)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		logger.Error("runner control-plane connectivity check failed", "error", fmt.Sprintf("endpoint_unhealthy: HTTP %d", resp.StatusCode))
+	if err := runnerConnectivityCheckWithRetry(ctx, logger, cfg); err != nil {
+		logger.Error("runner control-plane connectivity check failed", "error", err, "retryable", true, "maxAttempts", cfg.ControlPlaneConnectivityMaxAttempts)
 		os.Exit(1)
 	}
 	logger.Info("runner control-plane connectivity check completed", "control_plane_url", cfg.ControlPlaneURL)
+}
+
+func runnerConnectivityCheckWithRetry(ctx context.Context, logger *slog.Logger, cfg runnerConfig) error {
+	maxAttempts := cfg.ControlPlaneConnectivityMaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 12
+	}
+	initial := cfg.ControlPlaneConnectivityInitialDelay
+	if initial < 1*time.Second {
+		initial = 1 * time.Second
+	}
+	maxDelay := cfg.ControlPlaneConnectivityMaxDelay
+	if maxDelay < initial {
+		maxDelay = initial
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		client, err := newRunnerControlPlaneHTTPClientWithTLS(cfg.ReportTimeout, cfg.ControlPlaneCAFile, cfg.ControlPlaneTLSServerName)
+		if err != nil {
+			return err
+		}
+		req, reqErr := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(cfg.ControlPlaneURL, "/")+"/api/v1/health", nil)
+		if reqErr != nil {
+			return reqErr
+		}
+		resp, doErr := client.Do(req)
+		if doErr == nil {
+			resp.Body.Close()
+			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
+				return nil
+			}
+			lastErr = fmt.Errorf("endpoint_unhealthy: HTTP %d", resp.StatusCode)
+		} else {
+			lastErr = fmt.Errorf("endpoint_unreachable: %w", doErr)
+		}
+		if attempt >= maxAttempts {
+			break
+		}
+		delay := initial << (attempt - 1)
+		if delay > maxDelay || delay <= 0 {
+			delay = maxDelay
+		}
+		if logger != nil {
+			logger.Info("runner preflight delay before retry", "attempt", attempt, "nextAttemptIn", delay.String(), "error", lastErr)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("control-plane preflight retry limit exceeded: %w", lastErr)
 }
 
 func Run(logger *slog.Logger) {
@@ -1227,4 +1287,11 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }
