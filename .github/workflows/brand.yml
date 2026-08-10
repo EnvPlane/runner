@@ -1,0 +1,17 @@
+name: Brand guard
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  brand:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/test-check-brand.sh
+      - run: ./scripts/check-brand.sh
+
