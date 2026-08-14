@@ -340,6 +340,24 @@ func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
 	}
 }
 
+func TestRunnerConfigCanonicalAliasesAndLegacyFallback(t *testing.T) {
+	for _, name := range []string{"ENVPILOT_PROJECT_ID", "ENVPLANE_PROJECT_ID", "ENVPILOT_CLUSTER_ID", "ENVPLANE_CLUSTER_ID", "ENVPILOT_RUNNER_ID", "ENVPLANE_RUNNER_ID"} {
+		t.Setenv(name, "")
+		_ = os.Unsetenv(name)
+	}
+	t.Setenv("ENVPILOT_PROJECT_ID", "legacy-project")
+	t.Setenv("ENVPILOT_CLUSTER_ID", "legacy-cluster")
+	t.Setenv("ENVPILOT_RUNNER_ID", "legacy-runner")
+	legacy := runnerConfigFromEnv()
+	if legacy.ProjectID != "legacy-project" || len(legacy.EnvDiagnostics) == 0 {
+		t.Fatalf("legacy runner configuration not loaded safely: %#v", legacy)
+	}
+	t.Setenv("ENVPLANE_PROJECT_ID", "canonical-project")
+	if got := runnerConfigFromEnv().ProjectID; got != "canonical-project" {
+		t.Fatalf("canonical runner value did not win: %q", got)
+	}
+}
+
 func TestRunnerRegistrationTokenFingerprintAdoptsLegacyAuthThenDetectsRotation(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
 	if err := persistRuntimeToken(authPath, "legacy-runner-auth"); err != nil {

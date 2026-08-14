@@ -12,6 +12,8 @@ import (
 )
 
 type Config struct {
+	// EnvDiagnostics contains variable names only; values are never retained.
+	EnvDiagnostics               []string
 	Addr                         string
 	DataDir                      string
 	DatabaseURL                  string
@@ -195,6 +197,7 @@ func FromEnv() Config {
 		cfg.APIReadToken,
 		cfg.APIWriteToken,
 	)
+	cfg.EnvDiagnostics = legacyDiagnostics()
 	return cfg
 }
 
@@ -294,6 +297,12 @@ const (
 )
 
 func getenv(key, fallback string) string {
+	if strings.HasPrefix(key, "ENVPILOT_") {
+		canonical := "ENVPLANE_" + strings.TrimPrefix(key, "ENVPILOT_")
+		if value, set := os.LookupEnv(canonical); set {
+			return strings.TrimSpace(value)
+		}
+	}
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
 	}
@@ -301,7 +310,7 @@ func getenv(key, fallback string) string {
 }
 
 func getenvBool(key string, fallback bool) bool {
-	value := strings.TrimSpace(os.Getenv(key))
+	value := getenv(key, "")
 	if value == "" {
 		return fallback
 	}
@@ -313,7 +322,7 @@ func getenvBool(key string, fallback bool) bool {
 }
 
 func getenvInt(key string, fallback int) int {
-	value := strings.TrimSpace(os.Getenv(key))
+	value := getenv(key, "")
 	if value == "" {
 		return fallback
 	}
@@ -322,6 +331,23 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func legacyDiagnostics() []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, entry := range os.Environ() {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(name, "ENVPILOT_") {
+			continue
+		}
+		item := "deprecated:" + name
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func splitCSV(value string) []string {

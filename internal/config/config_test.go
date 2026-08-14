@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -107,6 +108,20 @@ func TestDeploymentBackendFromEnv(t *testing.T) {
 	t.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "GITOPS_MANIFEST")
 	if got := DeploymentBackendFromEnv(); got != "gitops_manifest" {
 		t.Fatalf("case-insensitive expected %q got %q", "gitops_manifest", got)
+	}
+}
+
+func TestCanonicalEnvAliasesPreferEnvPlaneAndWarnOnLegacy(t *testing.T) {
+	t.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "legacy")
+	t.Setenv("ENVPLANE_DEPLOYMENT_BACKEND", "fluxcd")
+	cfg := FromEnv()
+	if cfg.DeploymentBackend != "fluxcd" {
+		t.Fatalf("canonical deployment backend did not win: %q", cfg.DeploymentBackend)
+	}
+	for _, diagnostic := range cfg.EnvDiagnostics {
+		if strings.Contains(diagnostic, "legacy") {
+			t.Fatalf("diagnostics leaked value: %q", diagnostic)
+		}
 	}
 }
 

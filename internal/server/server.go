@@ -217,7 +217,7 @@ func New(deps Dependencies) *Server {
 	if deps.Config.GitHubWebhookDebugPayloadLog && deps.Logger != nil {
 		deps.Logger.Warn(
 			"github webhook full payload debug logging is enabled; webhook payloads can expose repository metadata and user content",
-			"config", "ENVPILOT_GITHUB_WEBHOOK_DEBUG_PAYLOAD_LOG",
+			"config", "ENVPLANE_GITHUB_WEBHOOK_DEBUG_PAYLOAD_LOG",
 		)
 	}
 
@@ -3172,7 +3172,7 @@ metadata:
 # IMPORTANT: create the runner registration token secret out-of-band.
 # Do not commit live tokens to Git.
 # Example:
-# kubectl -n %s create secret generic %s --from-literal=ENVPILOT_RUNNER_REGISTRATION_TOKEN='<runner-registration-token>' --from-literal=ENVPILOT_PROJECT_CONFIG_TOKEN='<project-config-token>' --dry-run=client -o yaml | kubectl apply -f -
+# kubectl -n %s create secret generic %s --from-literal=ENVPLANE_RUNNER_REGISTRATION_TOKEN='<runner-registration-token>' --from-literal=ENVPLANE_PROJECT_CONFIG_TOKEN='<project-config-token>' --dry-run=client -o yaml | kubectl apply -f -
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -3246,30 +3246,30 @@ spec:
           image: ghcr.io/envpilot/envpilot-runner:latest
           imagePullPolicy: IfNotPresent
           env:
-            - name: ENVPILOT_CONTROL_PLANE_URL
+            - name: ENVPLANE_CONTROL_PLANE_URL
               value: %q
-            - name: ENVPILOT_CLUSTER_ID
+            - name: ENVPLANE_CLUSTER_ID
               value: %q
-            - name: ENVPILOT_PROJECT_ID
+            - name: ENVPLANE_PROJECT_ID
               value: %q
-            - name: ENVPILOT_RUNNER_ID
+            - name: ENVPLANE_RUNNER_ID
               value: %q
-            - name: ENVPILOT_RUNNER_NAMESPACE
+            - name: ENVPLANE_RUNNER_NAMESPACE
               value: %q
-            - name: ENVPILOT_RUNNER_DEPLOYMENT_MODE
+            - name: ENVPLANE_RUNNER_DEPLOYMENT_MODE
               value: "gitops"
-            - name: ENVPILOT_PROJECT_CONFIG_URL
+            - name: ENVPLANE_PROJECT_CONFIG_URL
               value: %q
-            - name: ENVPILOT_PROJECT_CONFIG_TOKEN
+            - name: ENVPLANE_PROJECT_CONFIG_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: %s
-                  key: ENVPILOT_PROJECT_CONFIG_TOKEN
-            - name: ENVPILOT_RUNNER_REGISTRATION_TOKEN
+                  key: ENVPLANE_PROJECT_CONFIG_TOKEN
+            - name: ENVPLANE_RUNNER_REGISTRATION_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: %s
-                  key: ENVPILOT_RUNNER_REGISTRATION_TOKEN
+                  key: ENVPLANE_RUNNER_REGISTRATION_TOKEN
           livenessProbe:
             httpGet:
               path: /health

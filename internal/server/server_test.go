@@ -44,7 +44,7 @@ func testRepoRoot() string {
 }
 
 func TestMain(m *testing.M) {
-	_ = os.Setenv("ENVPILOT_DEPLOYMENT_BACKEND", "fluxcd")
+	_ = os.Setenv("ENVPLANE_DEPLOYMENT_BACKEND", "fluxcd")
 	os.Exit(m.Run())
 }
 
@@ -56,14 +56,14 @@ func (f fakeRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 
 func requireHTTPServer(t *testing.T) {
 	t.Helper()
-	if os.Getenv("ENVPILOT_RUN_HTTP_TESTS") != "1" && os.Getenv("ENVPILOT_RUN_NET_TESTS") != "1" {
-		t.Skip("HTTP test server binding is disabled. Set ENVPILOT_RUN_HTTP_TESTS=1 (or ENVPILOT_RUN_NET_TESTS=1) to run.")
+	if os.Getenv("ENVPLANE_RUN_HTTP_TESTS") != "1" && os.Getenv("ENVPLANE_RUN_NET_TESTS") != "1" {
+		t.Skip("HTTP test server binding is disabled. Set ENVPLANE_RUN_HTTP_TESTS=1 (or ENVPLANE_RUN_NET_TESTS=1) to run.")
 	}
 }
 
 func TestGitHubWebhookRejectsInvalidSignature(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "secret")
 	body := []byte(githubPullRequestPayload("opened", "feature/kan-1901"))
 
@@ -357,7 +357,7 @@ func TestGitHubIssueCommentPinPinsEnvironment(t *testing.T) {
 }
 
 func TestAPIReadOnlyTokenAllowsReadOnlyRequestsAndRejectsWrites(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	application, _, _ := newTestServer(t, "")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -381,7 +381,7 @@ func TestAPIReadOnlyTokenAllowsReadOnlyRequestsAndRejectsWrites(t *testing.T) {
 }
 
 func TestAPIWriteTokenPermitsMutatingRequests(t *testing.T) {
-	t.Setenv("ENVPILOT_API_WRITE_TOKEN", "write-token")
+	t.Setenv("ENVPLANE_API_WRITE_TOKEN", "write-token")
 	application, _, _ := newTestServer(t, "")
 
 	createReq := httptest.NewRequest(http.MethodPut, "/api/v1/projects/demo", strings.NewReader(`{"name":"Demo","product_id":"generic","git_repo":{"provider":"github","url":"https://example.com/repo.git","default_branch":"main"},"gitops_repository_id":"platform-gitops"}`))
@@ -525,9 +525,9 @@ func TestDashboardSummaryExcludesTerminatingAndTerminatedCost(t *testing.T) {
 }
 
 func TestAPIRBACSupportsTokenRoleMatrix(t *testing.T) {
-	t.Setenv("ENVPILOT_API_TOKEN_ROLES", "read-token:reader,admin-token:admin")
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "")
-	t.Setenv("ENVPILOT_API_WRITE_TOKEN", "")
+	t.Setenv("ENVPLANE_API_TOKEN_ROLES", "read-token:reader,admin-token:admin")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "")
+	t.Setenv("ENVPLANE_API_WRITE_TOKEN", "")
 	application, _, _ := newTestServer(t, "")
 
 	readListReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -566,10 +566,10 @@ func TestAPIRBACSupportsTokenRoleMatrix(t *testing.T) {
 }
 
 func TestAPIRoleBindingsIgnoreInvalidRoles(t *testing.T) {
-	t.Setenv("ENVPILOT_API_TOKEN_ROLES", "invalid:denied,bad-token:bad-role")
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "valid-token")
-	t.Setenv("ENVPILOT_API_WRITE_TOKEN", "")
-	t.Setenv("ENVPILOT_AGENT_TOKEN", "")
+	t.Setenv("ENVPLANE_API_TOKEN_ROLES", "invalid:denied,bad-token:bad-role")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "valid-token")
+	t.Setenv("ENVPLANE_API_WRITE_TOKEN", "")
+	t.Setenv("ENVPLANE_AGENT_TOKEN", "")
 	application, _, _ := newTestServer(t, "")
 	if got := len(application.config().APITokenRoles); got == 0 {
 		t.Fatalf("expected auth roles to be configured")
@@ -601,7 +601,7 @@ func TestAPIRoleBindingsIgnoreInvalidRoles(t *testing.T) {
 }
 
 func TestServerReloadConfigAffectsAPITokensAtRuntime(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "runtime-old-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "runtime-old-token")
 	application, _, _ := newTestServer(t, "")
 
 	baselineReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -672,7 +672,7 @@ func TestServerReloadConfigAffectsGitHubWebhookSecretAtRuntime(t *testing.T) {
 }
 
 func TestAPIWriteTokenRejectsMissingTokenForProtectedEndpoints(t *testing.T) {
-	t.Setenv("ENVPILOT_API_WRITE_TOKEN", "write-token")
+	t.Setenv("ENVPLANE_API_WRITE_TOKEN", "write-token")
 	application, _, _ := newTestServer(t, "")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -685,7 +685,7 @@ func TestAPIWriteTokenRejectsMissingTokenForProtectedEndpoints(t *testing.T) {
 }
 
 func TestAPIAuthorizationDoesNotAffectWebhookWithSignatureOnly(t *testing.T) {
-	t.Setenv("ENVPILOT_API_WRITE_TOKEN", "agent-token")
+	t.Setenv("ENVPLANE_API_WRITE_TOKEN", "agent-token")
 	application, _, _ := newTestServer(t, "secret")
 	body := []byte(githubPullRequestPayloadWithNumber("opened", "1905", "feature/secure"))
 
@@ -701,7 +701,7 @@ func TestAPIAuthorizationDoesNotAffectWebhookWithSignatureOnly(t *testing.T) {
 }
 
 func TestBackendDoesNotServeFrontendAssets(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	application, _, _ := newTestServer(t, "")
 
 	for _, path := range []string{"/", "/login", "/static/app.js"} {
@@ -715,7 +715,7 @@ func TestBackendDoesNotServeFrontendAssets(t *testing.T) {
 }
 
 func TestSessionCookieAuthorizesAPICallsWithoutAuthorizationHeader(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	application, _, _ := newTestServer(t, "")
 
 	apiReq := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
@@ -1122,9 +1122,9 @@ func TestProjectRBACFiltersProjectsByOAuthOrganization(t *testing.T) {
 }
 
 func TestAuditLogWritesJSONLineToConfiguredFile(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -1191,7 +1191,7 @@ func TestAuditLogWritesJSONLineToConfiguredFile(t *testing.T) {
 
 func TestRequestAuditExtractsProjectIDFromProjectEndpoint(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/checkout", nil)
@@ -1204,9 +1204,9 @@ func TestRequestAuditExtractsProjectIDFromProjectEndpoint(t *testing.T) {
 }
 
 func TestRateLimitRejectsRequestsAboveConfiguredRate(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
-	t.Setenv("ENVPILOT_RATE_LIMIT_REQUESTS", "2")
-	t.Setenv("ENVPILOT_RATE_LIMIT_SECONDS", "60")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_RATE_LIMIT_REQUESTS", "2")
+	t.Setenv("ENVPLANE_RATE_LIMIT_SECONDS", "60")
 	application, _, _ := newTestServer(t, "")
 
 	makeRequest := func() *httptest.ResponseRecorder {
@@ -1235,9 +1235,9 @@ func TestRateLimitRejectsRequestsAboveConfiguredRate(t *testing.T) {
 }
 
 func TestAuditLogRecordsActorUserHeaderWithoutTokenFingerprint(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects", nil)
@@ -1277,7 +1277,7 @@ func TestAuditLogRecordsActorUserHeaderWithoutTokenFingerprint(t *testing.T) {
 
 func TestAuditSchemaContractCoversSecurityRequestCredentialsConfigAndSecretEvents(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	projectID := "audit-contract"
 	const oauthSecret = "audit-contract-oauth-secret"
@@ -1378,7 +1378,7 @@ func TestAuditSchemaContractCoversSecurityRequestCredentialsConfigAndSecretEvent
 
 func TestBootstrapSCMCredentialsAreMaskedAndAudited(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	if _, err := application.projects.SaveProject(domain.Project{
 		ID:                 "secure-bootstrap",
@@ -2531,7 +2531,7 @@ func TestBootstrapSessionSimulateEndpointCanRunWithoutDryRun(t *testing.T) {
 
 func TestBootstrapSessionCompileSavesProjectConfigSecurelyAndAudits(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	if _, err := application.projects.SaveProject(domain.Project{
 		ID:                 "bootstrap-secure-config",
@@ -2629,7 +2629,7 @@ func TestBootstrapSessionCompileSavesProjectConfigSecurelyAndAudits(t *testing.T
 
 func TestProjectRuntimeBundleDoesNotLeakSensitiveValues(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	projectID := "runtime-bundle-leak-project"
 	appToken := "bundle-super-secret-app-token"
@@ -3219,7 +3219,7 @@ func TestBootstrapSessionRejectsProtectedFeatureNamespaceCleanupTarget(t *testin
 
 func TestBootstrapSecretStrategiesAreMaskedAndAudited(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	if _, err := application.projects.SaveProject(domain.Project{
 		ID:                 "secure-secrets-bootstrap",
@@ -3298,9 +3298,9 @@ func TestBootstrapSecretStrategiesAreMaskedAndAudited(t *testing.T) {
 }
 
 func TestRateLimitAppliesAcrossAPISessionRequests(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
-	t.Setenv("ENVPILOT_RATE_LIMIT_REQUESTS", "1")
-	t.Setenv("ENVPILOT_RATE_LIMIT_SECONDS", "60")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_RATE_LIMIT_REQUESTS", "1")
+	t.Setenv("ENVPLANE_RATE_LIMIT_SECONDS", "60")
 	application, _, _ := newTestServer(t, "")
 
 	sessionCookie := &http.Cookie{Name: apiSessionCookieName, Value: "readonly-token"}
@@ -3331,9 +3331,9 @@ func TestRateLimitAppliesAcrossAPISessionRequests(t *testing.T) {
 }
 
 func TestRateLimitReloadCanDisableLimitAtRuntime(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
-	t.Setenv("ENVPILOT_RATE_LIMIT_REQUESTS", "1")
-	t.Setenv("ENVPILOT_RATE_LIMIT_SECONDS", "60")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_RATE_LIMIT_REQUESTS", "1")
+	t.Setenv("ENVPLANE_RATE_LIMIT_SECONDS", "60")
 	application, _, _ := newTestServer(t, "")
 
 	makeRequest := func() *httptest.ResponseRecorder {
@@ -3487,7 +3487,7 @@ func TestOpenAPIAgentResourceScanUsesAgentAuthToken(t *testing.T) {
 }
 
 func TestMetricsEndpointReturnsPrometheusTextAndIncrementsCounters(t *testing.T) {
-	t.Setenv("ENVPILOT_API_READ_TOKEN", "readonly-token")
+	t.Setenv("ENVPLANE_API_READ_TOKEN", "readonly-token")
 	application, _, _ := newTestServer(t, "")
 
 	listReq := httptest.NewRequest(http.MethodGet, "/api/v1/products", nil)
@@ -5289,7 +5289,7 @@ func TestBootstrapAgentRegisterAndHeartbeatRequireAuthEvenWhenLegacyUnauthAgents
 
 func TestBootstrapAgentRegistrationTokenFlow(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	if _, err := application.projects.SaveProject(domain.Project{
 		ID:                 "bootstrap-agent",
@@ -5324,7 +5324,7 @@ func TestBootstrapAgentRegistrationTokenFlow(t *testing.T) {
 	if strings.Contains(tokenResp.HelmCommand, tokenResp.RegistrationToken) {
 		t.Fatalf("agent helm command leaked registration token: %q", tokenResp.HelmCommand)
 	}
-	if strings.Contains(tokenResp.HelmCommand, "ENVPILOT_AGENT_REGISTRATION_TOKEN") {
+	if strings.Contains(tokenResp.HelmCommand, "ENVPLANE_AGENT_REGISTRATION_TOKEN") {
 		t.Fatalf("agent helm command must not set live registration token env var: %q", tokenResp.HelmCommand)
 	}
 	if !strings.Contains(tokenResp.HelmCommand, "controlPlane.existingSecret") ||
@@ -5543,7 +5543,7 @@ func TestAgentRegistrationPersistenceFailureDoesNotConsumeBootstrapToken(t *test
 
 func TestBootstrapAlreadyUsedTokensReturnUnauthorizedAndAuditReplay(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, runnerDeployResp := prepareRunnerConfigFixture(t, "bootstrap-replay-runner")
 
 	agentProjectID := "bootstrap-replay-agent"
@@ -6207,7 +6207,7 @@ func TestBootstrapRunnerDeploymentInstructionsSupportHelmAndGitOpsModes(t *testi
 		strings.Contains(gitOpsResp.GitOpsManifest, "runner-config?") {
 		t.Fatalf("gitops config url must not include token query params: url=%q manifest=%q", gitOpsResp.ProjectConfigURL, gitOpsResp.GitOpsManifest)
 	}
-	if strings.Contains(gitOpsResp.GitOpsManifest, "ENVPILOT_RUNNER_REGISTRATION_TOKEN: \"") {
+	if strings.Contains(gitOpsResp.GitOpsManifest, "ENVPLANE_RUNNER_REGISTRATION_TOKEN: \"") {
 		t.Fatalf("gitops manifest must not render token value into stringData: %q", gitOpsResp.GitOpsManifest)
 	}
 	if !strings.Contains(gitOpsResp.GitOpsManifest, "create secret generic") {
@@ -6244,7 +6244,7 @@ func TestBootstrapWizardDoesNotRenderStandaloneRunnerTokens(t *testing.T) {
 
 func TestBootstrapRunnerDeploymentInstructionsOneTimeSecretCommandDisplay(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	projectID := "bootstrap-runner-one-time"
 	if _, err := application.projects.SaveProject(domain.Project{
@@ -7410,7 +7410,7 @@ func TestRunnerHeartbeatRejectsMismatchedIdentityExpiredAndReusedTokens(t *testi
 
 func TestRunnerHeartbeatFailedAuthenticationIsAudited(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-runner-heartbeat-audit"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	registerResp := registerRunnerForTest(t, application, deployResp)
@@ -7444,7 +7444,7 @@ func TestRunnerHeartbeatFailedAuthenticationIsAudited(t *testing.T) {
 
 func TestBootstrapInvalidAttemptsAreRateLimitedAndAudited(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-rate-limit"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	cfg := application.config()
@@ -7501,7 +7501,7 @@ func TestBootstrapInvalidAttemptsAreRateLimitedAndAudited(t *testing.T) {
 
 func TestBootstrapRateLimitBlocksRotatingInvalidTokensFromSameIP(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-rate-limit-rotating"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	cfg := application.config()
@@ -7545,7 +7545,7 @@ func TestBootstrapRateLimitBlocksRotatingInvalidTokensFromSameIP(t *testing.T) {
 
 func TestBootstrapRateLimitBlocksRotatingInvalidAgentScanNextTokensFromSameIP(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-rate-limit-agent-scan-next"
 	agentID := projectID + "-agent"
 	application, _, _ := newTestServer(t, "")
@@ -7668,7 +7668,7 @@ func TestAgentResourceScanNextWithValidTokenLowVolumePasses(t *testing.T) {
 
 func TestBootstrapMalformedJSONIsRateLimitedAndAuditedBeforeDecode(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-malformed-predecode"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	cfg := application.config()
@@ -8015,7 +8015,7 @@ func TestBootstrapSecurityLifecycleHelmCommandOmitsRawTokens(t *testing.T) {
 
 func TestBootstrapSecurityLifecycleMalformedUnauthenticatedJSONRateLimitedAndAudited(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 	cfg := application.config()
 	cfg.BootstrapRateLimitRequests = 2
@@ -8049,7 +8049,7 @@ func TestBootstrapSecurityLifecycleMalformedUnauthenticatedJSONRateLimitedAndAud
 
 func TestRunnerConfigMalformedJSONIsPredecodeRateLimitedWithProjectContext(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-runner-config-malformed"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 	cfg := application.config()
@@ -8097,7 +8097,7 @@ func TestRunnerConfigMalformedJSONIsPredecodeRateLimitedWithProjectContext(t *te
 
 func TestSuccessfulBootstrapEventsAreAuditedWithoutRawTokens(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	projectID := "bootstrap-success-audit"
 	application, deployResp := prepareRunnerConfigFixture(t, projectID)
 
@@ -8213,7 +8213,7 @@ func TestCentralSecretRedactionSanitizesAuditFileAndLogger(t *testing.T) {
 
 func TestMalformedBootstrapDecodeRedactsSecretsFromResponseAuditAndLogs(t *testing.T) {
 	auditPath := filepath.Join(t.TempDir(), "audit.log")
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", auditPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", auditPath)
 	application, _, logs := newTestServer(t, "")
 	bodySecret := "known-malformed-body-secret"
 	authSecret := "known-authorization-secret"
@@ -8252,7 +8252,7 @@ func TestMalformedBootstrapDecodeRedactsSecretsFromResponseAuditAndLogs(t *testi
 
 func TestAuditLogSanitizesBootstrapQueryTokens(t *testing.T) {
 	logPath := t.TempDir() + "/audit.log"
-	t.Setenv("ENVPILOT_AUDIT_LOG_PATH", logPath)
+	t.Setenv("ENVPLANE_AUDIT_LOG_PATH", logPath)
 	application, _, _ := newTestServer(t, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/resource-scan/next?projectId=demo&agentId=agent-1&registrationToken=query-secret-token", nil)
@@ -9145,7 +9145,7 @@ func TestSettingsEndpointsPersistUniversalConfiguration(t *testing.T) {
       "id": "github-token",
       "provider": "env",
       "scope": "github",
-      "reference": "ENVPILOT_GITHUB_TOKEN"
+      "reference": "ENVPLANE_GITHUB_TOKEN"
     }
   ],
   "manifest_sources": [
@@ -9224,7 +9224,7 @@ func TestSettingsEndpointsPersistUniversalConfiguration(t *testing.T) {
 	if len(settings.Repositories) != 1 || settings.Repositories[0].SecretRef != "github-token" {
 		t.Fatalf("unexpected repositories: %+v", settings.Repositories)
 	}
-	if len(settings.SecretRefs) != 1 || settings.SecretRefs[0].Reference != "ENVPILOT_GITHUB_TOKEN" {
+	if len(settings.SecretRefs) != 1 || settings.SecretRefs[0].Reference != "ENVPLANE_GITHUB_TOKEN" {
 		t.Fatalf("unexpected secret refs: %+v", settings.SecretRefs)
 	}
 	if len(settings.ManifestSources) != 1 || settings.ManifestSources[0].Path != "deploy/helm/checkout" {
@@ -9239,7 +9239,7 @@ func TestSettingsEndpointsPersistUniversalConfiguration(t *testing.T) {
 }
 
 func TestValidateSecretReferenceEndpointDoesNotReturnSecretValue(t *testing.T) {
-	t.Setenv("ENVPILOT_GITHUB_TOKEN", "super-secret-token")
+	t.Setenv("ENVPLANE_GITHUB_TOKEN", "super-secret-token")
 	application, _, _ := newTestServer(t, "")
 	payload := `{
   "secret_refs": [
@@ -9247,7 +9247,7 @@ func TestValidateSecretReferenceEndpointDoesNotReturnSecretValue(t *testing.T) {
       "id": "github-token",
       "provider": "env",
       "scope": "github",
-      "reference": "ENVPILOT_GITHUB_TOKEN"
+      "reference": "ENVPLANE_GITHUB_TOKEN"
     }
   ],
   "runtime": {"default_mode": "full"}

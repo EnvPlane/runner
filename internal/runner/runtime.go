@@ -34,6 +34,7 @@ const (
 )
 
 type runnerConfig struct {
+	EnvDiagnostics                       []string
 	ControlPlaneURL                      string
 	ControlPlaneEndpointMode             string
 	ControlPlaneCAFile                   string
@@ -76,7 +77,7 @@ func runnerConfigFromEnv() runnerConfig {
 	if registrationTokenChanged(authTokenFile, registrationToken) {
 		authToken = ""
 	}
-	return runnerConfig{
+	cfg := runnerConfig{
 		ControlPlaneURL:                      strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
 		ControlPlaneEndpointMode:             strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
 		ControlPlaneCAFile:                   getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
@@ -103,6 +104,8 @@ func runnerConfigFromEnv() runnerConfig {
 		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPILOT_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
 		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES", "")),
 	}
+	cfg.EnvDiagnostics = legacyDiagnostics()
+	return cfg
 }
 
 func normalizeRunnerNamespaceList(raw string) []string {
@@ -396,7 +399,10 @@ func Run(logger *slog.Logger) {
 		os.Exit(1)
 	}
 	health.set(preflight.Code == "passed")
-	logger.Info("envpilot runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
+	if len(cfg.EnvDiagnostics) > 0 {
+		logger.Warn("deprecated EnvPilot configuration variables are in use", "variables", cfg.EnvDiagnostics)
+	}
+	logger.Info("envplane runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
 	go runRunnerCommands(ctx, cfg, client, runtimeState, health, logger)
 	runRunnerHeartbeat(ctx, cfg, client, runtimeState, health, logger, stop)
 }
@@ -1271,6 +1277,12 @@ func hostnameFallback(fallback string) string {
 }
 
 func getenv(key, fallback string) string {
+	if strings.HasPrefix(key, "ENVPILOT_") {
+		canonical := "ENVPLANE_" + strings.TrimPrefix(key, "ENVPILOT_")
+		if value, set := os.LookupEnv(canonical); set {
+			return strings.TrimSpace(value)
+		}
+	}
 	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
 		return value
 	}
@@ -1278,7 +1290,7 @@ func getenv(key, fallback string) string {
 }
 
 func getenvInt(key string, fallback int) int {
-	value := strings.TrimSpace(os.Getenv(key))
+	value := getenv(key, "")
 	if value == "" {
 		return fallback
 	}
@@ -1287,6 +1299,23 @@ func getenvInt(key string, fallback int) int {
 		return fallback
 	}
 	return parsed
+}
+
+func legacyDiagnostics() []string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, entry := range os.Environ() {
+		name, _, ok := strings.Cut(entry, "=")
+		if !ok || !strings.HasPrefix(name, "ENVPILOT_") {
+			continue
+		}
+		item := "deprecated:" + name
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+	return result
 }
 
 func maxInt(left int, right int) int {
