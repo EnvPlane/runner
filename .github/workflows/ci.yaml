@@ -23,13 +23,17 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - name: Use published runtime modules
+        run: |
+          go mod edit -dropreplace=github.com/envpilot/contracts
+          go mod edit -dropreplace=github.com/envpilot/gitops
       - run: go test ./...
       - name: Verify production package reachability
         run: ./scripts/check-production-reachability.sh
       - run: go vet ./...
       - uses: golangci/golangci-lint-action@v6
         with:
-          version: v1.64
+          version: v2.1.6
       - run: go test -race ./...
       - run: go test -coverprofile=cover.out ./...
       - name: Enforce coverage floor

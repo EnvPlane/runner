@@ -92,6 +92,11 @@ jobs:
         with:
           go-version-file: runner/go.mod
           cache: true
+      - name: Use published runtime modules
+        working-directory: runner
+        run: |
+          go mod edit -dropreplace=github.com/envpilot/contracts
+          go mod edit -dropreplace=github.com/envpilot/gitops
       - name: Test runner
         working-directory: runner
         run: go test ./...
