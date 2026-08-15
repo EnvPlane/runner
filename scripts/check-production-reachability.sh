@@ -10,7 +10,7 @@ status=0
 for directory in internal/*; do
 	[[ -d "$directory" ]] || continue
 	package="github.com/envpilot/runner/$directory"
-	if ! rg -Fq "$package" "$deps"; then
+	if ! grep -Fq "$package" "$deps"; then
 		echo "production entrypoint does not reach $package" >&2
 		status=1
 	fi

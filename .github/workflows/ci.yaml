@@ -54,7 +54,7 @@ jobs:
       - name: Verify production package reachability
         run: ./scripts/check-production-reachability.sh
       - run: go vet ./...
-      - uses: golangci/golangci-lint-action@v6
+      - uses: golangci/golangci-lint-action@v7
         with:
           version: v2.1.6
       - run: go test -race ./...
