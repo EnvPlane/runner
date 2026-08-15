@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+	"unicode"
 
 	"github.com/envpilot/contracts/domain"
 	"github.com/envpilot/contracts/sdk/go/envplanesdk"
@@ -1018,7 +1019,7 @@ func isDirectRunnerHelmChartArchive(chartRef string) bool {
 
 func validRunnerHelmChartRef(chartRef string) bool {
 	chartRef = strings.TrimSpace(chartRef)
-	if chartRef == "" || strings.HasPrefix(chartRef, "deploy/helm/") || strings.HasPrefix(chartRef, "./") || strings.HasPrefix(chartRef, "../") {
+	if chartRef == "" || strings.HasPrefix(chartRef, "-") || strings.HasPrefix(chartRef, "deploy/helm/") || strings.HasPrefix(chartRef, "./") || strings.HasPrefix(chartRef, "../") || strings.IndexFunc(chartRef, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 		return false
 	}
 	if strings.HasPrefix(chartRef, "oci://") || strings.HasPrefix(chartRef, "https://") || strings.HasPrefix(chartRef, "http://") {

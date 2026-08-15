@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,9 @@ func NewRepositoryWriter(target RepositoryTarget) (*RepositoryWriter, error) {
 	target.Branch = strings.TrimSpace(target.Branch)
 	target.BranchStrategy = normalizeBranchStrategy(target.BranchStrategy)
 	target.Path = strings.Trim(strings.TrimSpace(target.Path), "/")
+	if err := validateRepositoryTarget(target.URL, target.Path); err != nil {
+		return nil, err
+	}
 	target.Workspace = strings.TrimSpace(target.Workspace)
 	if target.URL == "" {
 		return nil, fmt.Errorf("gitops repository url is required")
@@ -183,7 +187,7 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 		if w.target.Branch != "" {
 			args = append(args, "--branch", w.target.Branch)
 		}
-		args = append(args, cloneURL, w.target.Workspace)
+		args = append(args, "--", cloneURL, w.target.Workspace)
 		if err := runGitWithSecret(ctx, "", w.target.SecretValue, args...); err != nil {
 			return err
 		}
@@ -211,6 +215,25 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 		writeDir = filepath.Join(writeDir, w.target.Path)
 	}
 	w.writer = NewGitSubdirWriterWithSecret(writeDir, w.target.Workspace, w.target.Commit, w.target.Push, w.target.PushRemote, w.target.PushBranch, w.target.AuthorName, w.target.AuthorEmail, w.target.SecretValue)
+	return nil
+}
+
+func validateRepositoryTarget(rawURL, path string) error {
+	if strings.HasPrefix(strings.TrimSpace(rawURL), "-") || strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawURL)), "ext::") {
+		return fmt.Errorf("gitops repository url uses a forbidden transport")
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "ssh" && !strings.HasPrefix(rawURL, "git@") && !filepath.IsAbs(rawURL)) {
+		return fmt.Errorf("gitops repository url must use https, ssh, or scp syntax")
+	}
+	if filepath.IsAbs(path) {
+		return fmt.Errorf("gitops repository path must be relative")
+	}
+	for _, part := range strings.Split(filepath.ToSlash(path), "/") {
+		if part == ".." {
+			return fmt.Errorf("gitops repository path traversal is not allowed")
+		}
+	}
 	return nil
 }
 

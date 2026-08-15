@@ -2,8 +2,10 @@ package gitops
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type Writer interface {
@@ -40,7 +42,10 @@ func NewGitSubdirWriterWithSecret(dir string, commitDir string, commit bool, pus
 }
 
 func (w FileWriter) WriteManifest(_ context.Context, filename string, content []byte, _ string) (string, error) {
-	path := filepath.Join(w.dir, filename)
+	path, err := resolveInsideRoot(w.dir, filename)
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err
 	}
@@ -51,7 +56,10 @@ func (w FileWriter) WriteManifest(_ context.Context, filename string, content []
 }
 
 func (w FileWriter) RemoveManifest(_ context.Context, filename string, _ string) error {
-	path := filepath.Join(w.dir, filename)
+	path, err := resolveInsideRoot(w.dir, filename)
+	if err != nil {
+		return err
+	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -59,11 +67,33 @@ func (w FileWriter) RemoveManifest(_ context.Context, filename string, _ string)
 }
 
 func (w FileWriter) RemovePath(_ context.Context, path string, _ string) error {
-	fullPath := filepath.Join(w.dir, path)
+	fullPath, err := resolveInsideRoot(w.dir, path)
+	if err != nil {
+		return err
+	}
 	if err := os.RemoveAll(fullPath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
 	return nil
+}
+
+func resolveInsideRoot(root string, relative string) (string, error) {
+	root = filepath.Clean(root)
+	relative = strings.TrimSpace(relative)
+	if root == "" || root == "." || relative == "" || filepath.IsAbs(relative) {
+		return "", fmt.Errorf("path must be relative to a writer root")
+	}
+	for _, part := range strings.Split(filepath.ToSlash(relative), "/") {
+		if part == ".." {
+			return "", fmt.Errorf("path traversal is not allowed")
+		}
+	}
+	path := filepath.Clean(filepath.Join(root, relative))
+	rel, err := filepath.Rel(root, path)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("path escapes writer root")
+	}
+	return path, nil
 }
 
 func (w FileWriter) Commit(ctx context.Context, message string) (CommitResult, error) {

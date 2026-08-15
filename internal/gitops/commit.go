@@ -118,6 +118,7 @@ func runGit(ctx context.Context, dir string, args ...string) error {
 func runGitWithSecret(ctx context.Context, dir string, secret string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+allowedGitProtocols(dir, args))
 	cleanup := installGitAskPass(cmd, secret)
 	defer cleanup()
 	var stderr bytes.Buffer
@@ -132,6 +133,15 @@ func runGitWithSecret(ctx context.Context, dir string, secret string, args ...st
 	return nil
 }
 
+func allowedGitProtocols(dir string, args []string) string {
+	for _, arg := range args {
+		if filepath.IsAbs(arg) || strings.HasPrefix(strings.ToLower(arg), "file:") {
+			return "https:ssh:file"
+		}
+	}
+	return "https:ssh:file"
+}
+
 func installGitAskPass(cmd *exec.Cmd, secret string) func() {
 	if strings.TrimSpace(secret) == "" {
 		return func() {}
@@ -142,7 +152,13 @@ func installGitAskPass(cmd *exec.Cmd, secret string) func() {
 	}
 	script := filepath.Join(dir, "askpass.sh")
 	_ = os.WriteFile(script, []byte("#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' \"$GIT_USERNAME\" ;; *) printf '%s\\n' \"$GIT_PASSWORD\" ;; esac\n"), 0o700)
-	cmd.Env = append(os.Environ(), "GIT_ASKPASS="+script, "GIT_USERNAME=oauth2", "GIT_PASSWORD="+secret, "GIT_TERMINAL_PROMPT=0")
+	protocols := "https:ssh"
+	for _, value := range cmd.Env {
+		if strings.HasPrefix(value, "GIT_ALLOW_PROTOCOL=") {
+			protocols = strings.TrimPrefix(value, "GIT_ALLOW_PROTOCOL=")
+		}
+	}
+	cmd.Env = append(os.Environ(), "GIT_ASKPASS="+script, "GIT_USERNAME=oauth2", "GIT_PASSWORD="+secret, "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+protocols)
 	return func() { _ = os.RemoveAll(dir) }
 }
 
@@ -153,6 +169,7 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 func gitOutputWithSecret(ctx context.Context, dir string, secret string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0", "GIT_ALLOW_PROTOCOL="+allowedGitProtocols(dir, args))
 	cleanup := installGitAskPass(cmd, secret)
 	defer cleanup()
 	var stdout bytes.Buffer

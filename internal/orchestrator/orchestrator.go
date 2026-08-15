@@ -125,6 +125,7 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 	args := []string{
 		"upgrade",
 		"--install",
+		"--",
 		options.ReleaseName,
 		options.ChartRef,
 		"--namespace",
