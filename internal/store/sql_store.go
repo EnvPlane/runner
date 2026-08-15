@@ -39,7 +39,7 @@ ORDER BY created_at DESC`)
 	return items, rows.Err()
 }
 
-func (s *SQLStore) ListRecords() ([]domain.EnvironmentRecord, error) {
+func (s *SQLStore) ListRecords() ([]EnvironmentRecord, error) {
 	rows, err := s.db.Query(`
 SELECT id, project_id, pr_id, branch, commit_sha, status, type, ttl, payload, created_at, updated_at
 FROM environments
@@ -49,7 +49,7 @@ ORDER BY created_at DESC`)
 	}
 	defer rows.Close()
 
-	var items []domain.EnvironmentRecord
+	var items []EnvironmentRecord
 	for rows.Next() {
 		record, err := scanEnvironmentRecord(rows)
 		if err != nil {
@@ -68,7 +68,7 @@ func (s *SQLStore) Get(id string) (domain.Environment, error) {
 	return record.Environment(), nil
 }
 
-func (s *SQLStore) GetRecord(id string) (domain.EnvironmentRecord, error) {
+func (s *SQLStore) GetRecord(id string) (EnvironmentRecord, error) {
 	return s.get(id)
 }
 
@@ -77,7 +77,7 @@ func (s *SQLStore) Save(environment domain.Environment) error {
 		return errors.New("environment id is required")
 	}
 
-	record := domain.NewEnvironmentRecord(environment)
+	record := NewEnvironmentRecord(environment)
 	if record.CreatedAt.IsZero() {
 		record.CreatedAt = time.Now().UTC()
 		environment.CreatedAt = record.CreatedAt
@@ -131,10 +131,10 @@ func (s *SQLStore) Delete(id string) error {
 	return nil
 }
 
-func (s *SQLStore) get(id string) (domain.EnvironmentRecord, error) {
+func (s *SQLStore) get(id string) (EnvironmentRecord, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return domain.EnvironmentRecord{}, ErrNotFound
+		return EnvironmentRecord{}, ErrNotFound
 	}
 
 	record, err := s.scanByQuery(`
@@ -142,19 +142,19 @@ SELECT id, project_id, pr_id, branch, commit_sha, status, type, ttl, payload, cr
 FROM environments
 WHERE id = $1`, id)
 	if err != nil {
-		return domain.EnvironmentRecord{}, err
+		return EnvironmentRecord{}, err
 	}
 	return record, nil
 }
 
-func (s *SQLStore) scanByQuery(query string, args ...any) (domain.EnvironmentRecord, error) {
+func (s *SQLStore) scanByQuery(query string, args ...any) (EnvironmentRecord, error) {
 	row := s.db.QueryRow(query, args...)
 	return scanEnvironmentRecord(row)
 }
 
-func scanEnvironmentRecord(scanner rowScanner) (domain.EnvironmentRecord, error) {
+func scanEnvironmentRecord(scanner rowScanner) (EnvironmentRecord, error) {
 	var (
-		record    domain.EnvironmentRecord
+		record    EnvironmentRecord
 		payload   []byte
 		createdAt time.Time
 		updatedAt time.Time
@@ -163,16 +163,16 @@ func scanEnvironmentRecord(scanner rowScanner) (domain.EnvironmentRecord, error)
 		&record.Status, &record.Type, &record.TTL, &payload, &createdAt, &updatedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return domain.EnvironmentRecord{}, ErrNotFound
+			return EnvironmentRecord{}, ErrNotFound
 		}
-		return domain.EnvironmentRecord{}, err
+		return EnvironmentRecord{}, err
 	}
 	record.CreatedAt = createdAt
 	record.UpdatedAt = updatedAt
 	if len(payload) > 0 {
 		var environment domain.Environment
 		if err := json.Unmarshal(payload, &environment); err != nil {
-			return domain.EnvironmentRecord{}, err
+			return EnvironmentRecord{}, err
 		}
 		record.Payload = environment
 	}

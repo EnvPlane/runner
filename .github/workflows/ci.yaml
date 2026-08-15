@@ -1,0 +1,38 @@
+name: Runner CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enforce schema ownership
+        run: |
+          test ! -d migrations/postgres
+          test ! -f internal/server/openapi.json
+          test ! -d internal/postgres
+          test ! -f internal/gitops/renderer.go
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./...
+      - name: Verify production package reachability
+        run: ./scripts/check-production-reachability.sh
+      - run: go vet ./...
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64
+      - run: go test -race ./...
+      - run: go test -coverprofile=cover.out ./...
+      - name: Enforce coverage floor
+        run: |
+          total="$(go tool cover -func=cover.out | awk '/^total:/ {gsub(/%/, "", $NF); print $NF}')"
+          awk -v total="$total" 'BEGIN { if (total < 20) { print "coverage below 20%: " total "%"; exit 1 } }'

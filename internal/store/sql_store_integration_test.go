@@ -10,14 +10,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/runner/internal/postgres"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
 func TestSQLStoreCRUD(t *testing.T) {
@@ -467,8 +466,18 @@ func setupSQLStoreIntegrationDB(t *testing.T) (*sql.DB, func()) {
 	if dsn == "" {
 		t.Skip("ENVPILOT_TEST_DATABASE_URL is not set; skipping SQL store integration test")
 	}
+	if os.Getenv("ENVPILOT_TEST_DATABASE_SCHEMA_READY") != "1" {
+		t.Skip("database schema must be provisioned by control-plane; set ENVPILOT_TEST_DATABASE_SCHEMA_READY=1")
+	}
+	migrationsDir := strings.TrimSpace(os.Getenv("ENVPILOT_MIGRATIONS_DIR"))
+	if migrationsDir == "" {
+		t.Fatal("ENVPILOT_MIGRATIONS_DIR must point to the control-plane migration artifact")
+	}
+	if _, err := os.Stat(strings.TrimSuffix(migrationsDir, "/") + "/migrations.json"); err != nil {
+		t.Fatalf("control-plane migration artifact is unavailable: %v", err)
+	}
 
-	db, err := postgres.Open(dsn)
+	db, err := sql.Open("pgx", dsn)
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
@@ -478,11 +487,6 @@ func setupSQLStoreIntegrationDB(t *testing.T) (*sql.DB, func()) {
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
 		t.Fatalf("ping database: %v", err)
-	}
-	migrator := postgres.NewMigratorWithDir(db, filepath.Join("..", "..", "migrations", "postgres"))
-	if err := migrator.Apply(ctx); err != nil {
-		_ = db.Close()
-		t.Fatalf("apply migrations: %v", err)
 	}
 	cancel()
 

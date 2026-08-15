@@ -15,6 +15,16 @@ bounded results to the control plane.
 Redis remains an internal control-plane queue and is never exposed directly to
 the runner.
 
+The control-plane exclusively owns PostgreSQL schema migrations. Runner SQL
+integration tests require a schema provisioned by control-plane and never apply
+runner-local migrations. In the assembled workspace, verify this invariant with
+`deploy/scripts/check-schema-ownership.sh --root .`. The canonical OpenAPI
+document is owned by contracts.
+
+When running SQL integration tests, set `ENVPILOT_MIGRATIONS_DIR` to the
+control-plane `migrations/postgres` artifact and set
+`ENVPILOT_TEST_DATABASE_SCHEMA_READY=1` after that artifact has been applied.
+
 ## Development
 
 ```bash

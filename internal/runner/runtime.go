@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/envpilot/contracts/domain"
+	"github.com/envpilot/contracts/sdk/go/envplanesdk"
 	"github.com/envpilot/runner/internal/orchestrator"
 )
 
@@ -455,6 +456,14 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 		}
 		writeRunnerJSON(w, http.StatusOK, map[string]any{"status": "online"})
 	})
+	mux.HandleFunc("/metrics", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		status := 0
+		if health.online.Load() {
+			status = 1
+		}
+		_, _ = fmt.Fprintf(w, "# HELP envpilot_runner_up Whether the runner is online.\n# TYPE envpilot_runner_up gauge\nenvpilot_runner_up %d\n", status)
+	})
 	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		<-ctx.Done()
@@ -661,7 +670,27 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	if !found {
 		return true
 	}
-	result := executeRunnerCommandForConfig(ctx, cfg, command)
+	commandCtx, stopLease := context.WithCancel(ctx)
+	defer stopLease()
+	leaseDone := make(chan struct{})
+	go func() {
+		defer close(leaseDone)
+		ticker := time.NewTicker(90 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-commandCtx.Done():
+				return
+			case <-ticker.C:
+				if err := renewRunnerCommandLease(commandCtx, cfg, client, command); err != nil {
+					logger.Warn("runner command lease renewal failed", "command_id", command.ID, "error", err)
+				}
+			}
+		}
+	}()
+	result := executeRunnerCommandForConfig(commandCtx, cfg, command)
+	stopLease()
+	<-leaseDone
 	result.ProjectID = cfg.ProjectID
 	result.ClusterID = cfg.ClusterID
 	result.RunnerID = cfg.RunnerID
@@ -672,7 +701,11 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	// Helm was executing, instead of applying an old result to a new target.
 	result.RemoteClusterGeneration = command.RemoteClusterGeneration
 	result.RunnerIdentityIssuedAt = command.RunnerIdentityIssuedAt
-	if err := reportRunnerCommandResult(ctx, cfg, client, command.ID, result); err != nil {
+	// Result delivery must survive cancellation of the command execution
+	// context during process shutdown.
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), cfg.ReportTimeout)
+	defer reportCancel()
+	if err := reportRunnerCommandResult(reportCtx, cfg, client, command.ID, result); err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(state, health, logger, err)
 			return false
@@ -680,6 +713,11 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
 	}
 	return true
+}
+
+func renewRunnerCommandLease(ctx context.Context, cfg runnerConfig, client *http.Client, command domain.RunnerCommand) error {
+	endpoint := cfg.ControlPlaneURL + "/api/v1/runners/commands/" + url.PathEscape(command.ID) + "/lease?projectId=" + url.QueryEscape(cfg.ProjectID) + "&clusterId=" + url.QueryEscape(cfg.ClusterID) + "&runnerId=" + url.QueryEscape(cfg.RunnerID) + "&attemptId=" + url.QueryEscape(command.AttemptID)
+	return runnerPostJSONWithHeaders(ctx, client, endpoint, cfg.RunnerAuthToken, map[string]any{}, nil, http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}})
 }
 
 type runnerCommandEndpointMissingError struct{ detail string }
@@ -1096,15 +1134,13 @@ func classifyRunnerEndpointProbeError(err error) string {
 }
 
 func reportRunnerCommandResult(ctx context.Context, cfg runnerConfig, client *http.Client, commandID string, result domain.RunnerCommandResult) error {
-	return runnerPostJSONWithHeaders(
-		ctx,
-		client,
-		cfg.ControlPlaneURL+"/api/v1/runners/commands/"+url.PathEscape(commandID)+"/result",
-		cfg.RunnerAuthToken,
-		result,
-		nil,
-		http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}},
-	)
+	sdk := envplanesdk.Client{
+		BaseURL:       cfg.ControlPlaneURL,
+		HTTPClient:    client,
+		TokenProvider: func(context.Context) (string, error) { return cfg.RunnerAuthToken, nil },
+		Headers:       http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}},
+	}
+	return sdk.DoJSON(ctx, http.MethodPost, "/api/v1/runners/commands/"+url.PathEscape(commandID)+"/result", result, nil, "")
 }
 
 func runnerPostJSON(ctx context.Context, client *http.Client, endpoint string, bearerToken string, payload any, target any) error {

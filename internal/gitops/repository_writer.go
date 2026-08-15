@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -172,7 +171,7 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 	if err := os.MkdirAll(filepath.Dir(w.target.Workspace), 0o755); err != nil {
 		return err
 	}
-	cloneURL := repositoryCloneURL(w.target.URL, w.target.SecretValue)
+	cloneURL := w.target.URL
 	if _, err := os.Stat(filepath.Join(w.target.Workspace, ".git")); err != nil {
 		if !os.IsNotExist(err) {
 			return err
@@ -185,11 +184,11 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 			args = append(args, "--branch", w.target.Branch)
 		}
 		args = append(args, cloneURL, w.target.Workspace)
-		if err := runGit(ctx, "", args...); err != nil {
+		if err := runGitWithSecret(ctx, "", w.target.SecretValue, args...); err != nil {
 			return err
 		}
 	} else {
-		if err := runGit(ctx, w.target.Workspace, "fetch", "origin"); err != nil {
+		if err := runGitWithSecret(ctx, w.target.Workspace, w.target.SecretValue, "fetch", "origin"); err != nil {
 			return err
 		}
 	}
@@ -202,7 +201,7 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 		if err := runGit(ctx, w.target.Workspace, "checkout", w.target.Branch); err != nil {
 			return err
 		}
-		if err := runGit(ctx, w.target.Workspace, "pull", "--ff-only", "origin", w.target.Branch); err != nil {
+		if err := runGitWithSecret(ctx, w.target.Workspace, w.target.SecretValue, "pull", "--ff-only", "origin", w.target.Branch); err != nil {
 			return err
 		}
 	}
@@ -211,7 +210,7 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 	if w.target.Path != "" {
 		writeDir = filepath.Join(writeDir, w.target.Path)
 	}
-	w.writer = NewGitSubdirWriter(writeDir, w.target.Workspace, w.target.Commit, w.target.Push, w.target.PushRemote, w.target.PushBranch, w.target.AuthorName, w.target.AuthorEmail)
+	w.writer = NewGitSubdirWriterWithSecret(writeDir, w.target.Workspace, w.target.Commit, w.target.Push, w.target.PushRemote, w.target.PushBranch, w.target.AuthorName, w.target.AuthorEmail, w.target.SecretValue)
 	return nil
 }
 
@@ -226,16 +225,7 @@ func RepositoryWorkspace(root string, repositoryURL string, branch string) strin
 }
 
 func repositoryCloneURL(rawURL string, secretValue string) string {
-	secretValue = strings.TrimSpace(secretValue)
-	if secretValue == "" {
-		return rawURL
-	}
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.User != nil {
-		return rawURL
-	}
-	parsed.User = url.UserPassword("oauth2", secretValue)
-	return parsed.String()
+	return strings.TrimSpace(rawURL)
 }
 
 func normalizeBranchStrategy(value string) string {

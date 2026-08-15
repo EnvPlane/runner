@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -36,6 +38,13 @@ type CommitService struct {
 	pushBranch  string
 	authorName  string
 	authorEmail string
+	secret      string
+}
+
+func NewCommitServiceWithSecret(dir string, push bool, remote string, branch string, authorName string, authorEmail string, secret string) *CommitService {
+	service := NewCommitService(dir, push, remote, branch, authorName, authorEmail)
+	service.secret = strings.TrimSpace(secret)
+	return service
 }
 
 func NewCommitService(dir string, push bool, remote string, branch string, authorName string, authorEmail string) *CommitService {
@@ -94,7 +103,7 @@ func (s *CommitService) Commit(ctx context.Context, message string) (CommitResul
 		Branch:    s.pushBranch,
 	}
 	if s.push {
-		if err := runGit(ctx, s.dir, "push", s.pushRemote, "HEAD:"+s.pushBranch); err != nil {
+		if err := runGitWithSecret(ctx, s.dir, s.secret, "push", s.pushRemote, "HEAD:"+s.pushBranch); err != nil {
 			return result, err
 		}
 		result.Pushed = true
@@ -103,23 +112,49 @@ func (s *CommitService) Commit(ctx context.Context, message string) (CommitResul
 }
 
 func runGit(ctx context.Context, dir string, args ...string) error {
+	return runGitWithSecret(ctx, dir, "", args...)
+}
+
+func runGitWithSecret(ctx context.Context, dir string, secret string, args ...string) error {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cleanup := installGitAskPass(cmd, secret)
+	defer cleanup()
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if isGitConflictOutput(message) {
-			return ConflictError{Operation: "git " + strings.Join(args, " "), Message: message}
+			return ConflictError{Operation: "git operation", Message: message}
 		}
-		return fmt.Errorf("git %v failed: %w: %s", args, err, message)
+		return fmt.Errorf("git operation failed: %w: %s", err, message)
 	}
 	return nil
 }
 
+func installGitAskPass(cmd *exec.Cmd, secret string) func() {
+	if strings.TrimSpace(secret) == "" {
+		return func() {}
+	}
+	dir, err := os.MkdirTemp("", "envpilot-git-askpass-")
+	if err != nil {
+		return func() {}
+	}
+	script := filepath.Join(dir, "askpass.sh")
+	_ = os.WriteFile(script, []byte("#!/bin/sh\ncase \"$1\" in *Username*) printf '%s\\n' \"$GIT_USERNAME\" ;; *) printf '%s\\n' \"$GIT_PASSWORD\" ;; esac\n"), 0o700)
+	cmd.Env = append(os.Environ(), "GIT_ASKPASS="+script, "GIT_USERNAME=oauth2", "GIT_PASSWORD="+secret, "GIT_TERMINAL_PROMPT=0")
+	return func() { _ = os.RemoveAll(dir) }
+}
+
 func gitOutput(ctx context.Context, dir string, args ...string) (string, error) {
+	return gitOutputWithSecret(ctx, dir, "", args...)
+}
+
+func gitOutputWithSecret(ctx context.Context, dir string, secret string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cleanup := installGitAskPass(cmd, secret)
+	defer cleanup()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -127,9 +162,9 @@ func gitOutput(ctx context.Context, dir string, args ...string) (string, error) 
 	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if isGitConflictOutput(message) {
-			return "", ConflictError{Operation: "git " + strings.Join(args, " "), Message: message}
+			return "", ConflictError{Operation: "git operation", Message: message}
 		}
-		return "", fmt.Errorf("git %v failed: %w: %s", args, err, message)
+		return "", fmt.Errorf("git operation failed: %w: %s", err, message)
 	}
 	return stdout.String(), nil
 }

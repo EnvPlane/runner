@@ -28,10 +28,14 @@ func NewGitWriter(dir string, commit bool, push bool, remote string, branch stri
 }
 
 func NewGitSubdirWriter(dir string, commitDir string, commit bool, push bool, remote string, branch string, authorName string, authorEmail string) FileWriter {
+	return NewGitSubdirWriterWithSecret(dir, commitDir, commit, push, remote, branch, authorName, authorEmail, "")
+}
+
+func NewGitSubdirWriterWithSecret(dir string, commitDir string, commit bool, push bool, remote string, branch string, authorName string, authorEmail string, secret string) FileWriter {
 	return FileWriter{
 		dir:       dir,
 		commit:    commit,
-		committer: NewCommitService(commitDir, push, remote, branch, authorName, authorEmail),
+		committer: NewCommitServiceWithSecret(commitDir, push, remote, branch, authorName, authorEmail, secret),
 	}
 }
 

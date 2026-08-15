@@ -23,9 +23,9 @@ var ErrBootstrapIdentityMismatch = errors.New("bootstrap identity mismatch")
 
 type EnvironmentStore interface {
 	List() ([]domain.Environment, error)
-	ListRecords() ([]domain.EnvironmentRecord, error)
+	ListRecords() ([]EnvironmentRecord, error)
 	Get(id string) (domain.Environment, error)
-	GetRecord(id string) (domain.EnvironmentRecord, error)
+	GetRecord(id string) (EnvironmentRecord, error)
 	Save(environment domain.Environment) error
 	Delete(id string) error
 }
@@ -56,13 +56,13 @@ type ProjectConfigStore interface {
 type JSONStore struct {
 	path string
 	mu   sync.RWMutex
-	data map[string]domain.EnvironmentRecord
+	data map[string]EnvironmentRecord
 }
 
 func NewJSONStore(path string) (*JSONStore, error) {
 	store := &JSONStore{
 		path: path,
-		data: map[string]domain.EnvironmentRecord{},
+		data: map[string]EnvironmentRecord{},
 	}
 	if err := store.load(); err != nil {
 		return nil, err
@@ -84,11 +84,11 @@ func (s *JSONStore) List() ([]domain.Environment, error) {
 	return items, nil
 }
 
-func (s *JSONStore) ListRecords() ([]domain.EnvironmentRecord, error) {
+func (s *JSONStore) ListRecords() ([]EnvironmentRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	items := make([]domain.EnvironmentRecord, 0, len(s.data))
+	items := make([]EnvironmentRecord, 0, len(s.data))
 	for _, item := range s.data {
 		items = append(items, item)
 	}
@@ -109,13 +109,13 @@ func (s *JSONStore) Get(id string) (domain.Environment, error) {
 	return item.Environment(), nil
 }
 
-func (s *JSONStore) GetRecord(id string) (domain.EnvironmentRecord, error) {
+func (s *JSONStore) GetRecord(id string) (EnvironmentRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	item, ok := s.data[id]
 	if !ok {
-		return domain.EnvironmentRecord{}, ErrNotFound
+		return EnvironmentRecord{}, ErrNotFound
 	}
 	return item, nil
 }
@@ -124,7 +124,7 @@ func (s *JSONStore) Save(environment domain.Environment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data[environment.ID] = domain.NewEnvironmentRecord(environment)
+	s.data[environment.ID] = NewEnvironmentRecord(environment)
 	return s.persistLocked()
 }
 
@@ -156,7 +156,7 @@ func (s *JSONStore) load() error {
 	}
 	for id, item := range raw {
 		if bytes.Contains(item, []byte(`"project_id"`)) || bytes.Contains(item, []byte(`"payload"`)) {
-			var record domain.EnvironmentRecord
+			var record EnvironmentRecord
 			if err := json.Unmarshal(item, &record); err != nil {
 				return err
 			}
@@ -177,7 +177,7 @@ func (s *JSONStore) load() error {
 		if environment.ID == "" {
 			environment.ID = id
 		}
-		s.data[environment.ID] = domain.NewEnvironmentRecord(environment)
+		s.data[environment.ID] = NewEnvironmentRecord(environment)
 	}
 	return nil
 }

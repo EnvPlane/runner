@@ -268,10 +268,10 @@ func TestRepositoryWriterPullRequestStrategyCreatesProposal(t *testing.T) {
 	}
 }
 
-func TestRepositoryCloneURLInjectsHTTPToken(t *testing.T) {
+func TestRepositoryCloneURLNeverEmbedsHTTPToken(t *testing.T) {
 	cloneURL := repositoryCloneURL("https://github.com/acme/gitops.git", "token value")
-	if !strings.Contains(cloneURL, "oauth2:token%20value@github.com") {
-		t.Fatalf("clone url did not include encoded token: %q", cloneURL)
+	if strings.Contains(cloneURL, "token value") || strings.Contains(cloneURL, "oauth2:") {
+		t.Fatalf("clone url embedded a credential: %q", cloneURL)
 	}
 }
 
