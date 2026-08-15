@@ -1,7 +1,5 @@
 module github.com/envpilot/runner
 
-replace github.com/envpilot/contracts => ../contracts
-
 go 1.25.0
 
 require (
@@ -12,8 +10,6 @@ require (
 	github.com/redis/go-redis/v9 v9.19.0
 	gopkg.in/yaml.v3 v3.0.1
 )
-
-replace github.com/envpilot/gitops => ../gitops
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -26,3 +22,7 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
+
+replace github.com/envpilot/contracts => ../contracts
+
+replace github.com/envpilot/gitops => ../gitops
