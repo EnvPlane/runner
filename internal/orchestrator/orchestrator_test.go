@@ -759,7 +759,8 @@ func TestHelmDirectBackendApplyGeneratesValuesFile(t *testing.T) {
 	if err := backend.Apply(context.Background(), environment, domain.ProjectConfig{
 		Config: map[string]any{
 			"deployment": map[string]any{
-				"backend": "helm_direct",
+				"backend":    "helm_direct",
+				"helmDirect": map[string]any{"chartRef": "oci://registry.example/charts/app"},
 			},
 		},
 	}); err != nil {
@@ -828,7 +829,8 @@ func TestHelmDirectBackendApplyMapsErrorAsReadableReason(t *testing.T) {
 	projectConfig := domain.ProjectConfig{
 		Config: map[string]any{
 			"deployment": map[string]any{
-				"backend": "helm_direct",
+				"backend":    "helm_direct",
+				"helmDirect": map[string]any{"chartRef": "oci://registry.example/charts/app"},
 			},
 		},
 	}

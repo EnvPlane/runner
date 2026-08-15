@@ -122,6 +122,9 @@ func NewCLIHelmExecutor() *CLIHelmExecutor {
 }
 
 func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgradeOptions) error {
+	if strings.TrimSpace(options.ChartRef) != "" && !domain.IsSafeHelmChartRef(options.ChartRef) {
+		return fmt.Errorf("invalid helm chart reference")
+	}
 	args := []string{
 		"upgrade",
 		"--install",
