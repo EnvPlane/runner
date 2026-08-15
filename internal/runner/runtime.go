@@ -622,18 +622,26 @@ func prepareRunnerFixtureRecovery(cfg runnerConfig, logger *slog.Logger) {
 }
 
 func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
+	backoff := time.Second
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-time.After(backoff):
 			if state.stale.Load() {
 				return
 			}
-			if !pollRunnerCommandsOnce(ctx, cfg, client, state, health, logger) {
+			keepPolling, found := pollRunnerCommandsOnceWithFound(ctx, cfg, client, state, health, logger)
+			if !keepPolling {
 				return
+			}
+			if found {
+				backoff = time.Second
+			} else if backoff < 15*time.Second {
+				backoff *= 2
+				if backoff > 15*time.Second {
+					backoff = 15 * time.Second
+				}
 			}
 		}
 	}
@@ -643,11 +651,16 @@ func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Clien
 // incompatibility. Transient transport/auth/response failures are kept visible
 // in logs and retried on the next interval.
 func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) bool {
+	keepPolling, _ := pollRunnerCommandsOnceWithFound(ctx, cfg, client, state, health, logger)
+	return keepPolling
+}
+
+func pollRunnerCommandsOnceWithFound(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) (bool, bool) {
 	command, found, err := nextRunnerCommand(ctx, cfg, client)
 	if err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(state, health, logger, err)
-			return false
+			return false, false
 		}
 		if isRunnerCommandAPIIncompatible(err) {
 			reason := "Runner command API is unavailable or incompatible: " + err.Error()
@@ -657,7 +670,7 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 				logger.Error("runner command API incompatible and degraded heartbeat failed", "error", heartbeatErr)
 			}
 			logger.Error("runner command API incompatible; command polling disabled", "error", err)
-			return false
+			return false, false
 		}
 		if isRunnerCommandAuthenticationError(err) {
 			logger.Error("runner command poll authentication failed", "error", err)
@@ -666,10 +679,10 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 		} else {
 			logger.Error("runner command poll response handling failed", "error", err)
 		}
-		return true
+		return true, false
 	}
 	if !found {
-		return true
+		return true, false
 	}
 	commandCtx, stopLease := context.WithCancel(ctx)
 	defer stopLease()
@@ -709,11 +722,11 @@ func pollRunnerCommandsOnce(ctx context.Context, cfg runnerConfig, client *http.
 	if err := reportRunnerCommandResult(reportCtx, cfg, client, command.ID, result); err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(state, health, logger, err)
-			return false
+			return false, true
 		}
 		logger.Error("runner command result callback failed", "command_id", command.ID, "error", err)
 	}
-	return true
+	return true, true
 }
 
 func renewRunnerCommandLease(ctx context.Context, cfg runnerConfig, client *http.Client, command domain.RunnerCommand) error {
