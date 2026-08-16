@@ -97,6 +97,7 @@ jobs:
         run: |
           go mod edit -dropreplace=github.com/envpilot/contracts
           go mod edit -dropreplace=github.com/envpilot/gitops
+          go mod tidy
       - name: Test runner
         working-directory: runner
         run: go test ./...
@@ -133,7 +134,7 @@ jobs:
           provenance: mode=max
           sbom: true
       - name: Scan published image for high and critical vulnerabilities
-        uses: aquasecurity/trivy-action@0.36.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: ghcr.io/envpilot/runner:sha-${{ github.sha }}
           format: table

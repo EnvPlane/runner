@@ -50,6 +50,7 @@ jobs:
         run: |
           go mod edit -dropreplace=github.com/envpilot/contracts
           go mod edit -dropreplace=github.com/envpilot/gitops
+          go mod tidy
       - name: Scan Go dependencies
         uses: golang/govulncheck-action@v1
         with:
