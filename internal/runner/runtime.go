@@ -402,7 +402,7 @@ func Run(logger *slog.Logger) {
 	}
 	health.set(preflight.Code == "passed")
 	if len(cfg.EnvDiagnostics) > 0 {
-		logger.Warn("deprecated EnvPilot configuration variables are in use", "variables", cfg.EnvDiagnostics)
+		logger.Warn("deprecated legacy configuration variables are in use", "variables", cfg.EnvDiagnostics)
 	}
 	logger.Info("envplane runner started", "project_id", cfg.ProjectID, "cluster_id", cfg.ClusterID, "runner_id", cfg.RunnerID, "control_plane_url", cfg.ControlPlaneURL)
 	go runRunnerCommands(ctx, cfg, client, runtimeState, health, logger)
