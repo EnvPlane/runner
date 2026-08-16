@@ -223,10 +223,6 @@ func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
 	return nil
 }
 
-func newRunnerControlPlaneHTTPClient(timeout time.Duration, caFile string) (*http.Client, error) {
-	return newRunnerControlPlaneHTTPClientWithTLS(timeout, caFile, "")
-}
-
 func newRunnerControlPlaneHTTPClientWithTLS(timeout time.Duration, caFile, serverName string) (*http.Client, error) {
 	if timeout <= 0 {
 		timeout = 10 * time.Second
@@ -309,7 +305,7 @@ func runnerConnectivityCheckWithRetry(ctx context.Context, logger *slog.Logger, 
 		}
 		resp, doErr := client.Do(req)
 		if doErr == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			if resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices {
 				return nil
 			}
@@ -830,7 +826,7 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 	if err != nil {
 		return domain.RunnerCommand{}, false, runnerCommandTransportError{cause: err}
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNoContent {
 		if err := validateRunnerCommandAPIResponse(resp); err != nil {
 			return domain.RunnerCommand{}, false, runnerCommandVersionProbeError{detail: err.Error()}
@@ -869,10 +865,6 @@ func validateRunnerCommandAPIResponse(resp *http.Response) error {
 		return runnerCommandCompatibilityError{detail: fmt.Sprintf("expected response header %s=%q, got %q", runnerCommandAPIVersionHeader, runnerCommandAPIVersion, version)}
 	}
 	return nil
-}
-
-func executeRunnerCommand(ctx context.Context, command domain.RunnerCommand) domain.RunnerCommandResult {
-	return executeRunnerCommandWithBackend(ctx, command, orchestrator.NewHelmDirectBackend(nil))
 }
 
 func executeRunnerCommandForConfig(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand) domain.RunnerCommandResult {
@@ -1094,7 +1086,7 @@ func probeRunnerManagementEndpoint(ctx context.Context, cfg runnerConfig, client
 		report.Code = classifyRunnerEndpointProbeError(err)
 		return report
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	report.DNSResolved, report.TCPConnected = true, true
 	if strings.HasPrefix(strings.ToLower(cfg.ControlPlaneURL), "https://") {
 		report.TLSVerified = true
@@ -1118,7 +1110,7 @@ func probeRunnerManagementEndpoint(ctx context.Context, cfg runnerConfig, client
 		report.Code = "runtime_auth_failed"
 		return report
 	}
-	defer accessResp.Body.Close()
+	defer func() { _ = accessResp.Body.Close() }()
 	if accessResp.StatusCode != http.StatusNoContent {
 		report.Code = "runtime_auth_failed"
 		return report
@@ -1184,7 +1176,7 @@ func runnerPostJSONWithHeaders(ctx context.Context, client *http.Client, endpoin
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		responseBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		var response struct {

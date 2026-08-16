@@ -87,7 +87,7 @@ func (s *SQLBootstrapSessionStore) ClaimBootstrapToken(request BootstrapTokenCla
 	if err != nil {
 		return domain.BootstrapSession{}, err
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	row := tx.QueryRow(`
 SELECT id, project_id, current_step, status, created_by, data, created_at, updated_at
@@ -121,11 +121,6 @@ WHERE id = $1`,
 		return domain.BootstrapSession{}, err
 	}
 	return updated, nil
-}
-
-func (s *SQLBootstrapSessionStore) scanByQuery(query string, args ...any) (domain.BootstrapSession, error) {
-	row := s.db.QueryRow(query, args...)
-	return s.scanSession(row)
 }
 
 func (s *SQLBootstrapSessionStore) scanSession(scanner interface{ Scan(dest ...any) error }) (domain.BootstrapSession, error) {

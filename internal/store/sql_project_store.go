@@ -29,9 +29,6 @@ func NewSQLProjectStore(db *sql.DB, defaults []domain.Project) (*SQLProjectStore
 		}
 	}
 
-	if store == nil {
-		return nil, nil
-	}
 	return store, nil
 }
 
@@ -43,7 +40,7 @@ ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]domain.Project, 0)
 	for rows.Next() {

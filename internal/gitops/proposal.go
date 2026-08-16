@@ -112,7 +112,7 @@ func (s PullRequestService) post(ctx context.Context, endpoint string, authHeade
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 1024))
 		return fmt.Errorf("gitops pull request failed: status=%d body=%s", response.StatusCode, strings.TrimSpace(string(body)))

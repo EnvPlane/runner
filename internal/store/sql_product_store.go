@@ -47,7 +47,7 @@ ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	items := make([]domain.ProductTemplate, 0)
 	for rows.Next() {

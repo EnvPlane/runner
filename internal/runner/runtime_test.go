@@ -163,7 +163,7 @@ func TestRunnerControlPlaneHTTPClientTrustsMountedPrivateCA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("private-CA runner health request: %v", err)
 	}
-	defer response.Body.Close()
+	defer func() { _ = response.Body.Close() }()
 	if response.StatusCode != http.StatusOK {
 		t.Fatalf("private-CA runner health status=%d", response.StatusCode)
 	}
