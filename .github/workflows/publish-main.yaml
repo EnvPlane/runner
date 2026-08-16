@@ -35,7 +35,7 @@ jobs:
       digest: ${{ steps.published.outputs.digest }}
       metadata: ${{ steps.published.outputs.metadata }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           path: runner
       - id: source_read_auth
@@ -70,19 +70,19 @@ jobs:
         run: |
           echo 'GOPRIVATE=github.com/envpilot/*' >> "$GITHUB_ENV"
           git config --global url."https://x-access-token:${SOURCE_TOKEN}@github.com/".insteadOf "https://github.com/"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: EnvPlane/bootstrap
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: bootstrap
           ref: main
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: EnvPlane/deploy
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: deploy
           ref: main
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: EnvPlane/frontend
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
