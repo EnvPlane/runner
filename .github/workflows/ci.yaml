@@ -46,14 +46,15 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Scan Go dependencies
-        uses: golang/govulncheck-action@v1
-        with:
-          go-package: ./...
       - name: Use published runtime modules
         run: |
           go mod edit -dropreplace=github.com/envpilot/contracts
           go mod edit -dropreplace=github.com/envpilot/gitops
+      - name: Scan Go dependencies
+        uses: golang/govulncheck-action@v1
+        with:
+          go-package: ./...
+          repo-checkout: false
       - run: go test ./...
       - name: Verify production package reachability
         run: ./scripts/check-production-reachability.sh
