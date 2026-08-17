@@ -42,10 +42,10 @@ jobs:
           test ! -f internal/server/openapi.json
           test ! -d internal/postgres
           test ! -f internal/gitops/renderer.go
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
+      - name: Ensure Go toolchain
+        run: |
+          GO_VERSION_FILE=go.mod \
+          ./scripts/ensure-go.sh
       - name: Use published runtime modules
         run: |
           go mod edit -dropreplace=github.com/envpilot/contracts

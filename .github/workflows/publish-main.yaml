@@ -88,10 +88,10 @@ jobs:
           token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
           path: frontend
           ref: main
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: runner/go.mod
-          cache: true
+      - name: Ensure Go toolchain
+        run: |
+          GO_VERSION_FILE=runner/go.mod \
+          ./scripts/ensure-go.sh
       - name: Use published runtime modules
         working-directory: runner
         run: |
