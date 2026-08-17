@@ -1,6 +1,6 @@
 module github.com/envpilot/runner
 
-go 1.25.0
+go 1.25.13
 
 require (
 	github.com/envpilot/agent v0.1.0
@@ -24,5 +24,3 @@ require (
 )
 
 replace github.com/envpilot/gitops => ../gitops
-
-replace github.com/envpilot/contracts => ../contracts

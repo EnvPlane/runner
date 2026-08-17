@@ -92,6 +92,8 @@ jobs:
         run: |
           GO_VERSION_FILE=runner/go.mod \
           ./scripts/ensure-go.sh
+      - name: Select module Go toolchain
+        run: echo "GOTOOLCHAIN=go$(awk '/^go[[:space:]]/ {print $2; exit}' runner/go.mod)" >> "$GITHUB_ENV"
       - name: Use published runtime modules
         working-directory: runner
         run: |
