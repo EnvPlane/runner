@@ -57,13 +57,13 @@ jobs:
           fi
       - id: source_read_app
         if: steps.source_read_auth.outputs.method == 'app'
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: agent,bootstrap,contracts,deploy,frontend
-          permission-contents: read
+        env:
+          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
+          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          GH_APP_OWNER: ${{ github.repository_owner }}
+          GH_APP_REPOSITORY: deploy
+          GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
+        run: ./scripts/obtain-github-app-token.sh
       - name: Configure private Go modules
         env:
           SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
@@ -191,13 +191,13 @@ jobs:
           fi
       - id: deploy_dispatch_app
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: deploy
-          permission-contents: write
+        env:
+          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
+          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          GH_APP_OWNER: ${{ github.repository_owner }}
+          GH_APP_REPOSITORY: deploy
+          GH_APP_TOKEN_PERMISSIONS: '{"contents":"write"}'
+        run: ./scripts/obtain-github-app-token.sh
       - name: Dispatch immutable image update with GitHub App
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         env:

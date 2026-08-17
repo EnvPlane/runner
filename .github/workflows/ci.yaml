@@ -23,13 +23,13 @@ jobs:
           if [[ -n "$CLIENT_ID" && -n "$APP_PRIVATE_KEY" ]]; then echo "method=app" >> "$GITHUB_OUTPUT"; elif [[ -n "$FALLBACK_PAT" ]]; then echo "method=pat" >> "$GITHUB_OUTPUT"; else echo "No source-read credentials configured." >&2; exit 1; fi
       - id: source_read_app
         if: steps.source_read_auth.outputs.method == 'app'
-        uses: actions/create-github-app-token@v3
-        with:
-          client-id: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          private-key: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          owner: ${{ github.repository_owner }}
-          repositories: contracts,gitops
-          permission-contents: read
+        env:
+          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
+          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          GH_APP_OWNER: ${{ github.repository_owner }}
+          GH_APP_REPOSITORY: deploy
+          GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
+        run: ./scripts/obtain-github-app-token.sh
       - name: Configure private Go modules
         env:
           SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
