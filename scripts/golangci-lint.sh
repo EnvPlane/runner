@@ -96,7 +96,7 @@ lint_bin="${lint_gopath}/bin/golangci-lint"
 
 if [[ "${GOLANGCI_LINT_FORCE_INSTALL:-1}" != "0" ]]; then
   rm -f "${lint_bin}"
-  "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
+  "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${lint_version}"
 else
   # Legacy behavior: keep fast path when preinstalled binary is compatible.
   need_install=0
@@ -122,7 +122,7 @@ else
 
   if [[ "${need_install}" -eq 1 ]]; then
     rm -f "${lint_bin}"
-    "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
+    "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${lint_version}"
   fi
 fi
 
