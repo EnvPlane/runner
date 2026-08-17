@@ -10,17 +10,57 @@ GH_APP_TOKEN_PERMISSIONS="${GH_APP_TOKEN_PERMISSIONS:-{\"contents\":\"read\"}}"
 GH_API_BASE="https://api.github.com"
 
 normalize_permissions_json() {
-  local value="$1"
+  local value="${1:-}"
+  local attempt=0
   value="${value//$'\r'/}"
-  value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+  value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
 
-  if [[ "$value" == '"'* && "$value" == *'"' ]]; then
-    value="${value:1:${#value}-2}"
-  elif [[ "$value" == "'*" && "$value" == *"'" ]]; then
-    value="${value:1:${#value}-2}"
+  # Peel single-level wrapper quotes if present.
+  while :; do
+    local first_char="${value:0:1}"
+    local last_char="${value: -1}"
+    if [[ "$first_char" == '"' && "$last_char" == '"' && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ "$first_char" == "'" && "$last_char" == "'" && ${#value} -ge 2 ]]; then
+      value="${value:1:${#value}-2}"
+    else
+      break
+    fi
+    value="$(printf '%s' "$value" | sed -E 's/^[[:space:]]+|[[:space:]]+$//g')"
+  done
+
+  # Keep only the first JSON object if extra noise is present.
+  if [[ "$value" == *"{"* && "$value" == *"}"* ]]; then
+    value="$(printf '%s' "$value" | sed -E 's/^.*(\\{.*\\}).*$/\\1/')"
   fi
 
-  printf '%s' "$value"
+  # Iteratively normalize common malformed suffixes (extra braces/quotes/comma).
+  while (( attempt < 12 )); do
+    if jq -e -c . <<<"$value" >/dev/null 2>&1; then
+      printf '%s' "$value"
+      return 0
+    fi
+
+    if [[ "$value" == *"}" ]]; then
+      value="${value%\}}"
+      ((attempt += 1))
+      continue
+    fi
+    if [[ "$value" == *"," ]]; then
+      value="${value%,}"
+      ((attempt += 1))
+      continue
+    fi
+    if [[ "$value" == *'"' ]]; then
+      value="${value%\"}"
+      ((attempt += 1))
+      continue
+    fi
+
+    break
+  done
+
+  return 1
 }
 
 jwt_b64_url() {
@@ -57,7 +97,11 @@ if [[ -z "$installation_id" || "$installation_id" == "null" ]]; then
   exit 1
 fi
 
-GH_APP_TOKEN_PERMISSIONS=$(normalize_permissions_json "$GH_APP_TOKEN_PERMISSIONS")
+if ! GH_APP_TOKEN_PERMISSIONS="$(normalize_permissions_json "$GH_APP_TOKEN_PERMISSIONS")"; then
+  echo "Invalid GH_APP_TOKEN_PERMISSIONS JSON value" >&2
+  exit 1
+fi
+
 permissions_json=$(jq -c -e . <<<"$GH_APP_TOKEN_PERMISSIONS")
 if [[ -z "$permissions_json" ]]; then
   echo "Invalid GH_APP_TOKEN_PERMISSIONS JSON value" >&2
