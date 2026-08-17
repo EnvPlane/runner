@@ -5,7 +5,9 @@ root="$(git rev-parse --show-toplevel)"
 cd "$root"
 deps="$(mktemp)"
 trap 'rm -f "$deps"' EXIT
-GOSUMDB=off GOPROXY=off go list -deps ./cmd/... >"$deps"
+# Avoid triggering module-based Go toolchain downloads in this step when
+# GOSUMDB/GOPROXY are disabled.
+GOTOOLCHAIN=local GOSUMDB=off GOPROXY=off go list -deps ./cmd/... >"$deps"
 status=0
 for directory in internal/*; do
 	[[ -d "$directory" ]] || continue
