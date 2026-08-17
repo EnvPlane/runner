@@ -11,7 +11,7 @@ jobs:
   brand:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: ./scripts/test-check-brand.sh
       - run: ./scripts/check-brand.sh
 
