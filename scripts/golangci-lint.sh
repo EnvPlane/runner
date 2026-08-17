@@ -5,6 +5,7 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 lint_version="${GOLANGCI_LINT_VERSION:-v1.64.8}"
 module_file="${GO_VERSION_FILE:-go.mod}"
 required_go="${GO_MIN_VERSION:-}"
+
 if [[ -z "${required_go}" ]] && [[ -f "${module_file}" ]]; then
   required_go="$(awk '/^go[[:space:]]/ { print $2; exit }' "${module_file}")"
 fi
@@ -20,42 +21,71 @@ version_ge() {
   [[ "${lowest}" == "${required}" ]]
 }
 
-go_version() {
-  "$1" version | awk '{print $3}' | sed 's/^go//'
+go_version_from_bin() {
+  local bin="$1"
+  "$bin" version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
 }
 
-resolve_go() {
-  local candidate="${GO_BIN:-$(command -v go || true)}"
-  if [[ -n "${candidate}" ]]; then
-    if [[ ! -x "${candidate}" ]]; then
-      echo "--error: GO_BIN is not executable: ${candidate}" >&2
-      return 1
-    fi
-    echo "${candidate}"
+check_go_binary() {
+  local bin="$1"
+  local ver
+  if [[ ! -x "${bin}" ]]; then
+    return 1
+  fi
+  ver="$(go_version_from_bin "${bin}")"
+  if [[ -z "${ver}" ]]; then
+    return 1
+  fi
+  if version_ge "${ver}" "${required_go}"; then
+    GO_BIN_SELECTED="${bin}"
+    GO_VERSION_SELECTED="${ver}"
     return 0
   fi
-  echo "No go binary found in PATH" >&2
   return 1
 }
 
-go_bin="$(resolve_go)"
-go_ver="$(go_version "${go_bin}")"
-if ! version_ge "${go_ver}" "${required_go}"; then
-  if [[ -x "${script_dir}/ensure-go.sh" ]]; then
-    GO_MIN_VERSION="${required_go}" GO_VERSION_FILE="${module_file}" "${script_dir}/ensure-go.sh"
-    go_bin="$(resolve_go)"
-    go_ver="$(go_version "${go_bin}")"
-  fi
-fi
+ensure_and_select_go() {
+  local bin
 
-if ! version_ge "${go_ver}" "${required_go}"; then
-  echo "::error::Go version is ${go_ver}, but golangci-lint install requires at least ${required_go}." >&2
-  echo "::error::Run ensure-go.sh before scripts/golangci-lint.sh or set GO_BIN explicitly." >&2
+  GO_BIN_SELECTED=""
+  GO_VERSION_SELECTED=""
+
+  if [[ -n "${GO_BIN:-}" ]]; then
+    check_go_binary "${GO_BIN}" && return 0
+  fi
+
+  bin="$(command -v go || true)"
+  if [[ -n "${bin}" ]] && check_go_binary "${bin}"; then
+    return 0
+  fi
+
+  if check_go_binary "/usr/local/go/bin/go"; then
+    return 0
+  fi
+
+  if [[ -x "${script_dir}/ensure-go.sh" ]]; then
+    GO_MIN_VERSION="${required_go}" GO_VERSION_FILE="${module_file}" "${script_dir}/ensure-go.sh" || true
+    if check_go_binary "/usr/local/go/bin/go"; then
+      return 0
+    fi
+  fi
+
+  bin="$(command -v go || true)"
+  if [[ -n "${bin}" ]] && check_go_binary "${bin}"; then
+    return 0
+  fi
+
+  return 1
+}
+
+if ! ensure_and_select_go; then
+  echo "::error::No suitable go toolchain for golangci-lint. required >= ${required_go}" >&2
+  echo "::error::Check GO_BIN, or set GO_MIN_VERSION/GO_VERSION_FILE." >&2
   exit 1
 fi
 
 if [[ "${GOLANGCI_LINT_FORCE_INSTALL:-1}" != "0" ]]; then
-  "${go_bin}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
+  "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
 else
   # Legacy behavior: keep fast path when preinstalled binary is compatible.
   lint_bin="${GOPATH:-$(go env GOPATH)}/bin/golangci-lint"
@@ -64,7 +94,7 @@ else
   if [[ ! -x "${lint_bin}" ]]; then
     need_install=1
   else
-    lint_output="$(${lint_bin} --version)"
+    lint_output="$(${lint_bin} --version 2>&1)"
     installed_lint="$(echo "${lint_output}" | awk 'match($0, /v[0-9]+\.[0-9]+(\.[0-9]+)?/, m) { print m[0]; exit }')"
     installed_builder="$(echo "${lint_output}" | awk 'match($0, /go[0-9]+\.[0-9]+(\.[0-9]+)?/, m) { print m[0]; exit }')"
 
@@ -81,7 +111,8 @@ else
   fi
 
   if [[ "${need_install}" -eq 1 ]]; then
-    "${go_bin}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
+    rm -f "${lint_bin}"
+    "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
   fi
 fi
 
