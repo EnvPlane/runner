@@ -82,20 +82,20 @@ install_from_godl() {
     *) announce "::error::Unsupported architecture: $(uname -m)"; return 1 ;;
   esac
 
-  local tmp
-  tmp="$(mktemp -d)"
-  trap 'rm -rf "$tmp"' EXIT
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  trap 'if [[ -n "${tmp_dir-}" ]]; then rm -rf "$tmp_dir"; fi' EXIT
 
   local archive="go${required_version}.linux-${arch}.tar.gz"
   local url="https://go.dev/dl/${archive}"
   announce "Downloading Go ${required_version} from ${url}"
-  curl -fsSL "$url" -o "$tmp/$archive"
+  curl -fsSL "$url" -o "$tmp_dir/$archive"
 
   local target="/usr/local/go"
   if [[ -d "$target" ]]; then
     sudo rm -rf "$target"
   fi
-  sudo tar -C /usr/local -xzf "$tmp/$archive"
+  sudo tar -C /usr/local -xzf "$tmp_dir/$archive"
   if candidate_version_ok "/usr/local/go/bin/go"; then
     return 0
   fi
