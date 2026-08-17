@@ -52,10 +52,7 @@ jobs:
           go mod edit -dropreplace=github.com/envpilot/gitops
           go mod tidy
       - name: Scan Go dependencies
-        uses: golang/govulncheck-action@v1
-        with:
-          go-package: ./...
-          repo-checkout: false
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...
       - run: go test ./...
       - name: Verify production package reachability
         run: ./scripts/check-production-reachability.sh

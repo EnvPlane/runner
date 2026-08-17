@@ -9,6 +9,20 @@ GH_APP_REPOSITORY="${GH_APP_REPOSITORY:-deploy}"
 GH_APP_TOKEN_PERMISSIONS="${GH_APP_TOKEN_PERMISSIONS:-{\"contents\":\"read\"}}"
 GH_API_BASE="https://api.github.com"
 
+normalize_permissions_json() {
+  local value="$1"
+  value="${value//$'\r'/}"
+  value="$(printf '%s' "$value" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+
+  if [[ "$value" == '"'* && "$value" == *'"' ]]; then
+    value="${value:1:${#value}-2}"
+  elif [[ "$value" == "'*" && "$value" == *"'" ]]; then
+    value="${value:1:${#value}-2}"
+  fi
+
+  printf '%s' "$value"
+}
+
 jwt_b64_url() {
   openssl base64 -e -A | tr '/+' '_-' | tr -d '='
 }
@@ -43,7 +57,17 @@ if [[ -z "$installation_id" || "$installation_id" == "null" ]]; then
   exit 1
 fi
 
-permissions_payload=$(jq -n --argjson permissions "$GH_APP_TOKEN_PERMISSIONS" '{permissions: $permissions}')
+GH_APP_TOKEN_PERMISSIONS=$(normalize_permissions_json "$GH_APP_TOKEN_PERMISSIONS")
+permissions_json=$(jq -c -e . <<<"$GH_APP_TOKEN_PERMISSIONS")
+if [[ -z "$permissions_json" ]]; then
+  echo "Invalid GH_APP_TOKEN_PERMISSIONS JSON value" >&2
+  exit 1
+fi
+if ! jq -e 'type == "object"' <<<"$permissions_json" > /dev/null; then
+  echo "GH_APP_TOKEN_PERMISSIONS must be a JSON object" >&2
+  exit 1
+fi
+permissions_payload="{\"permissions\":${permissions_json}}"
 access=$(curl -fsS \
   -X POST \
   -H "Authorization: Bearer ${jwt}" \
