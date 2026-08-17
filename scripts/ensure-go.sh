@@ -35,7 +35,10 @@ candidate_version_ok() {
     return 1
   fi
   local current_version
-  current_version="$("$go_bin" version | awk '{print $3}' | sed 's/^go//')"
+  # Probe the installed binary itself. Auto toolchain selection can make an
+  # older Go report a downloaded version that is unavailable to later
+  # GOTOOLCHAIN=local steps.
+  current_version="$(GOTOOLCHAIN=local "$go_bin" version 2>/dev/null | awk '{print $3}' | sed 's/^go//')"
   if version_ge "$current_version" "$required_version"; then
     announce "Using Go ${current_version} from ${go_bin}"
     add_to_path "$go_bin"
