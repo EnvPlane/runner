@@ -2,7 +2,7 @@
 set -euo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-lint_version="${GOLANGCI_LINT_VERSION:-v1.64.8}"
+lint_version="${GOLANGCI_LINT_VERSION:-v2.12.2}"
 module_file="${GO_VERSION_FILE:-go.mod}"
 required_go="${GO_MIN_VERSION:-}"
 
