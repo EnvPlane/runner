@@ -207,7 +207,10 @@ jobs:
           METADATA: ${{ steps.published.outputs.metadata }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --retry 3 --request POST \
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            --retry 6 --retry-delay 5 --retry-max-time 120 \
+            --request POST \
             --url "https://api.github.com/repos/${{ github.repository_owner }}/deploy/dispatches" \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
@@ -220,7 +223,10 @@ jobs:
           METADATA: ${{ steps.published.outputs.metadata }}
         run: |
           set -euo pipefail
-          curl --fail-with-body --retry 3 --request POST \
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            --retry 6 --retry-delay 5 --retry-max-time 120 \
+            --request POST \
             --url "https://api.github.com/repos/${{ github.repository_owner }}/deploy/dispatches" \
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer $GH_TOKEN" \
