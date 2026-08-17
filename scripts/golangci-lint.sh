@@ -26,6 +26,11 @@ go_version_from_bin() {
   "$bin" version 2>/dev/null | awk '{print $3}' | sed 's/^go//'
 }
 
+go_gopath_from_bin() {
+  local bin="$1"
+  "$bin" env GOPATH
+}
+
 check_go_binary() {
   local bin="$1"
   local ver
@@ -39,6 +44,7 @@ check_go_binary() {
   if version_ge "${ver}" "${required_go}"; then
     GO_BIN_SELECTED="${bin}"
     GO_VERSION_SELECTED="${ver}"
+    GO_GOPATH_SELECTED="$(go_gopath_from_bin "${bin}")"
     return 0
   fi
   return 1
@@ -49,6 +55,7 @@ ensure_and_select_go() {
 
   GO_BIN_SELECTED=""
   GO_VERSION_SELECTED=""
+  GO_GOPATH_SELECTED=""
 
   if [[ -n "${GO_BIN:-}" ]]; then
     check_go_binary "${GO_BIN}" && return 0
@@ -84,11 +91,14 @@ if ! ensure_and_select_go; then
   exit 1
 fi
 
+lint_gopath="${GO_GOPATH_SELECTED}"
+lint_bin="${lint_gopath}/bin/golangci-lint"
+
 if [[ "${GOLANGCI_LINT_FORCE_INSTALL:-1}" != "0" ]]; then
+  rm -f "${lint_bin}"
   "${GO_BIN_SELECTED}" install "github.com/golangci/golangci-lint/cmd/golangci-lint@${lint_version}"
 else
   # Legacy behavior: keep fast path when preinstalled binary is compatible.
-  lint_bin="${GOPATH:-$(go env GOPATH)}/bin/golangci-lint"
   need_install=0
 
   if [[ ! -x "${lint_bin}" ]]; then
@@ -116,4 +126,4 @@ else
   fi
 fi
 
-"${lint_bin:=${GOPATH:-$(go env GOPATH)}/bin/golangci-lint}" run ./...
+"${lint_bin}" run ./...
