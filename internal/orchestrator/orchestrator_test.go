@@ -1019,6 +1019,9 @@ func TestCLIHelmExecutorBuildsUpgradeInstallCommand(t *testing.T) {
 			t.Fatalf("missing arg %q in %v", required, capturedArgs)
 		}
 	}
+	if requireArg["--"] {
+		t.Fatalf("helm upgrade must not insert an option terminator before positional arguments: %v", capturedArgs)
+	}
 }
 
 func TestCLIHelmExecutorOmitsCreateNamespaceWhenDisabled(t *testing.T) {
