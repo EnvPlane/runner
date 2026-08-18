@@ -29,7 +29,16 @@ jobs:
           GH_APP_OWNER: ${{ github.repository_owner }}
           GH_APP_REPOSITORY: deploy
           GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
-        run: ./scripts/obtain-github-app-token.sh
+        run: |
+          if [[ -x ./scripts/obtain-github-app-token.sh ]]; then
+            ./scripts/obtain-github-app-token.sh
+          elif [[ -x ./runner/scripts/obtain-github-app-token.sh ]]; then
+            ./runner/scripts/obtain-github-app-token.sh
+          else
+            echo "Script not found: ./scripts/obtain-github-app-token.sh" >&2
+            echo "Checked paths: ./scripts and ./runner/scripts" >&2
+            exit 1
+          fi
       - name: Configure private Go modules
         env:
           SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
