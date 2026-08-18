@@ -921,6 +921,11 @@ func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerC
 // kubeconfig.
 func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend, namespaceAllowed func(string) bool) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
+	if len(command.ProjectConfig.Sensitive) > 0 || strings.Contains(strings.ToLower(string(mustJSON(command.ProjectConfig.Config))), "manualvalue") {
+		result.ErrorCode = "secret_materialization_boundary_violation"
+		result.Error = "RunnerCommand contains secret material"
+		return result
+	}
 	projectConfig := projectConfigForRunnerCommand(command)
 	var err error
 	switch command.Operation {
@@ -988,6 +993,14 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 	}
 	result.Status = "succeeded"
 	return result
+}
+
+func mustJSON(value any) []byte {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return nil
+	}
+	return payload
 }
 
 // projectConfigForRunnerCommand keeps command fields and the compiled project
