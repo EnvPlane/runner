@@ -921,6 +921,11 @@ func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerC
 // kubeconfig.
 func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend, namespaceAllowed func(string) bool) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
+	if err := validateReleasePlanCommand(command); err != nil {
+		result.ErrorCode = "release_plan_required"
+		result.Error = err.Error()
+		return result
+	}
 	if len(command.ProjectConfig.Sensitive) > 0 || strings.Contains(strings.ToLower(string(mustJSON(command.ProjectConfig.Config))), "manualvalue") {
 		result.ErrorCode = "secret_materialization_boundary_violation"
 		result.Error = "RunnerCommand contains secret material"
@@ -993,6 +998,27 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 	}
 	result.Status = "succeeded"
 	return result
+}
+
+func validateReleasePlanCommand(command domain.RunnerCommand) error {
+	switch command.Operation {
+	case "create", "recreate", "delete", "force_cleanup", "status":
+	default:
+		return nil
+	}
+	if strings.TrimSpace(command.ReleasePlanID) == "" || strings.TrimSpace(command.ReleasePlanDigest) == "" || strings.TrimSpace(command.ReleasePlanSignature) == "" || strings.TrimSpace(command.ReleasePlanKeyID) == "" {
+		return fmt.Errorf("immutable signed EnvironmentReleasePlan reference is required")
+	}
+	if command.Environment.ReleasePlanID != "" && command.Environment.ReleasePlanID != command.ReleasePlanID {
+		return fmt.Errorf("release plan identity does not match environment")
+	}
+	if command.Environment.ReleasePlanDigest != "" && command.Environment.ReleasePlanDigest != command.ReleasePlanDigest {
+		return fmt.Errorf("release plan digest does not match environment")
+	}
+	if command.ChartRef != "" || command.ChartVersion != "" {
+		return fmt.Errorf("chart references are not a runtime source; use the signed release plan")
+	}
+	return nil
 }
 
 func mustJSON(value any) []byte {
