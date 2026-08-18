@@ -932,6 +932,17 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 		return result
 	}
 	projectConfig := projectConfigForRunnerCommand(command)
+	if (command.Operation == "delete" || command.Operation == "force_cleanup") && len(command.CleanupInventory) > 0 {
+		tenantID := command.Environment.TenantID
+		if tenantID == "" {
+			tenantID = domain.DefaultTenantID
+		}
+		if err := domain.ValidateCleanupInventory(command.CleanupInventory, tenantID, command.ProjectID, command.Environment.Namespace); err != nil {
+			result.ErrorCode = "cleanup_ownership_violation"
+			result.Error = err.Error()
+			return result
+		}
+	}
 	var err error
 	switch command.Operation {
 	case "validate_helm_chart":
@@ -972,6 +983,10 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 		// The Runner therefore remains the sole Kubernetes actor even for an
 		// audited force-clean recovery command.
 		err = backend.Delete(ctx, command.Environment, projectConfig)
+		if err == nil {
+			result.CleanupVerified = true
+			result.EnvironmentStatus = string(domain.StatusTerminated)
+		}
 	case "status":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {

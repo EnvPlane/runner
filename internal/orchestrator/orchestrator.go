@@ -1391,11 +1391,15 @@ func (o *EnvironmentOrchestrator) DeleteWithWriterAndProjectConfig(ctx context.C
 	if environment.Status == domain.StatusTerminated {
 		return environment, nil
 	}
+	environment.Cleanup.Phase = domain.CleanupRequested
+	environment.Cleanup.Attempts++
+	environment.Cleanup.Verified = false
 	environment.Status = domain.StatusDeleteRequested
 	environment.LastError = ""
 	environment.UpdatedAt = o.now()
 	_ = o.store.Save(environment)
 	environment.Status = domain.StatusGitOpsDeletePending
+	environment.Cleanup.Phase = domain.CleanupBackendDeleting
 	environment.UpdatedAt = o.now()
 	_ = o.store.Save(environment)
 	backend, err := o.backendForProjectConfig(projectConfig)
@@ -1446,6 +1450,9 @@ func (o *EnvironmentOrchestrator) DeleteWithWriterAndProjectConfig(ctx context.C
 		}
 	}
 
+	environment.Cleanup.Phase = domain.CleanupVerifiedEmpty
+	environment.Cleanup.Verified = true
+	environment.Cleanup.Phase = domain.CleanupTerminated
 	environment.Status = domain.StatusTerminated
 	environment.LastError = ""
 	environment.ManifestPath = ""
