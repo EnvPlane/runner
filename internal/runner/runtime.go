@@ -356,6 +356,7 @@ func Run(logger *slog.Logger) {
 		return
 	}
 	var registeredNow bool
+	bootstrapRegistrationToken := cfg.RegistrationToken
 	cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 	if err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
@@ -382,7 +383,31 @@ func Run(logger *slog.Logger) {
 	if preflight.Code != "passed" {
 		initialStatus, initialError = string(domain.RunnerHeartbeatStatusDegraded), "management endpoint preflight failed: "+preflight.Code
 	}
-	if err := reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, initialStatus, initialError, preflight); err != nil {
+	err = reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, initialStatus, initialError, preflight)
+	if err != nil && isRunnerAuthTokenNotIssuedError(err) && strings.TrimSpace(bootstrapRegistrationToken) != "" {
+		logger.Warn("persisted runner auth token was rejected; re-registering with bootstrap credentials", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
+		if clearErr := clearRuntimeToken(cfg.RunnerAuthTokenFile); clearErr != nil {
+			logger.Error("clear rejected runner auth token", "error", clearErr)
+			return
+		}
+		cfg.RunnerAuthToken = ""
+		cfg.RegistrationToken = bootstrapRegistrationToken
+		cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
+		if err == nil && registeredNow {
+			if configErr := fetchRunnerProjectConfig(ctx, cfg, client, logger); configErr != nil {
+				logger.Warn("runner project config fetch failed after auth recovery", "error", configErr)
+			}
+		}
+		if err == nil {
+			preflight = probeRunnerManagementEndpoint(ctx, cfg, client)
+			initialStatus, initialError = string(domain.RunnerHeartbeatStatusOnline), ""
+			if preflight.Code != "passed" {
+				initialStatus, initialError = string(domain.RunnerHeartbeatStatusDegraded), "management endpoint preflight failed: "+preflight.Code
+			}
+			err = reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, initialStatus, initialError, preflight)
+		}
+	}
+	if err != nil {
 		if isRunnerFixtureIdentityReissuedError(err) {
 			prepareRunnerFixtureRecovery(cfg, logger)
 			return
@@ -807,6 +832,15 @@ func isRunnerFixtureIdentityReissuedError(err error) bool {
 		return true
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "fixture_identity_reissued")
+}
+
+func isRunnerAuthTokenNotIssuedError(err error) bool {
+	var apiError runnerAPIError
+	if errors.As(err, &apiError) {
+		return apiError.status == http.StatusUnauthorized && strings.Contains(strings.ToLower(apiError.detail), "token is not issued")
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "401") && strings.Contains(message, "token is not issued")
 }
 
 func isRunnerCommandTransportError(err error) bool {
