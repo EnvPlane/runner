@@ -63,7 +63,7 @@ jobs:
           GH_APP_OWNER: ${{ github.repository_owner }}
           GH_APP_REPOSITORY: deploy
           GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
-        run: ./scripts/obtain-github-app-token.sh
+        run: ./runner/scripts/obtain-github-app-token.sh
       - name: Configure private Go modules
         env:
           SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
@@ -91,7 +91,7 @@ jobs:
       - name: Ensure Go toolchain
         run: |
           GO_VERSION_FILE=runner/go.mod \
-          ./scripts/ensure-go.sh
+          ./runner/scripts/ensure-go.sh
       - name: Select module Go toolchain
         run: echo "GOTOOLCHAIN=go$(awk '/^go[[:space:]]/ {print $2; exit}' runner/go.mod)" >> "$GITHUB_ENV"
       - name: Use published runtime modules
@@ -199,7 +199,7 @@ jobs:
           GH_APP_OWNER: ${{ github.repository_owner }}
           GH_APP_REPOSITORY: deploy
           GH_APP_TOKEN_PERMISSIONS: '{"contents":"write"}'
-        run: ./scripts/obtain-github-app-token.sh
+        run: ./runner/scripts/obtain-github-app-token.sh
       - name: Dispatch immutable image update with GitHub App
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         env:
