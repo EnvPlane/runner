@@ -1779,3 +1779,39 @@ func (f *fakeWriter) Commit(_ context.Context, message string) (gitops.CommitRes
 	}
 	return gitops.CommitResult{Committed: true, PullRequestURL: f.commitPullRequestURL}, f.err
 }
+
+func TestRenderCompiledManifestTemplatesUsesEnvironmentInputs(t *testing.T) {
+	environment := domain.Environment{
+		ID:        "cms-feature-login",
+		Project:   "cms",
+		Namespace: "envpilot-pr-42",
+		Source: domain.SCMSource{
+			PullRequestID: "42",
+			Branch:        "feature/login",
+			Commit:        "deadbeef",
+		},
+	}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"bootstrapSessionData": map[string]any{
+			"manifestTemplates": []any{map[string]any{
+				"path": "templates/{{ .PRNumber }}/deployment-{{ .project.id }}.yaml",
+				"kind": "Deployment",
+				"name": "api",
+				"yaml": "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {{ .project.id }}\n  namespace: {{ .environment.name }}\nspec:\n  template:\n    spec:\n      containers:\n      - name: api\n        image: example/api:{{ .CommitSHA }}\n",
+			}},
+		},
+	}}
+	manifests, ok, err := renderCompiledManifestTemplates(environment, projectConfig)
+	if err != nil || !ok {
+		t.Fatalf("render compiled templates: ok=%v err=%v", ok, err)
+	}
+	if len(manifests) != 1 || manifests[0].Path != "templates/42/deployment-cms.yaml" {
+		t.Fatalf("unexpected rendered manifest metadata: %+v", manifests)
+	}
+	content := string(manifests[0].Content)
+	for _, expected := range []string{"name: cms", "namespace: cms-feature-login", "image: example/api:deadbeef"} {
+		if !strings.Contains(content, expected) {
+			t.Fatalf("rendered manifest missing %q: %s", expected, content)
+		}
+	}
+}

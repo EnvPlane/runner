@@ -1142,7 +1142,12 @@ func NewGitOpsManifestBackend(renderer gitops.Renderer) *GitOpsManifestBackend {
 	return &GitOpsManifestBackend{manifestBackend: manifestBackend{renderer: renderer}}
 }
 
-func (b *manifestBackend) Render(_ context.Context, environment domain.Environment, _ domain.ProjectConfig) ([]Manifest, error) {
+func (b *manifestBackend) Render(_ context.Context, environment domain.Environment, projectConfig domain.ProjectConfig) ([]Manifest, error) {
+	if manifests, ok, err := renderCompiledManifestTemplates(environment, projectConfig); err != nil {
+		return nil, err
+	} else if ok {
+		return manifests, nil
+	}
 	manifests, err := b.renderer.RenderManifestSet(environment)
 	if err != nil {
 		return nil, err
@@ -1156,6 +1161,93 @@ func (b *manifestBackend) Render(_ context.Context, environment domain.Environme
 		}
 	}
 	return adapted, nil
+}
+
+type compiledManifestTemplate struct {
+	Path      string `json:"path"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	YAML      string `json:"yaml"`
+}
+
+// renderCompiledManifestTemplates is the runtime bridge from Bootstrap's
+// discovered desired state to the GitOps backend. A project with compiled
+// templates must render those templates verbatim with only the documented
+// environment substitutions; generic product manifests are retained only for
+// legacy projects that have no compiled template inventory.
+func renderCompiledManifestTemplates(environment domain.Environment, projectConfig domain.ProjectConfig) ([]Manifest, bool, error) {
+	bootstrapData, _ := projectConfig.Config["bootstrapSessionData"].(map[string]any)
+	if bootstrapData == nil {
+		return nil, false, nil
+	}
+	raw, ok := bootstrapData["manifestTemplates"]
+	if !ok {
+		return nil, false, nil
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return nil, true, fmt.Errorf("encode compiled manifest templates: %w", err)
+	}
+	var templates []compiledManifestTemplate
+	if err := json.Unmarshal(encoded, &templates); err != nil {
+		return nil, true, fmt.Errorf("decode compiled manifest templates: %w", err)
+	}
+	if len(templates) == 0 {
+		return nil, true, fmt.Errorf("compiled manifest template inventory is empty")
+	}
+	data := compiledManifestTemplateData(environment)
+	manifests := make([]Manifest, 0, len(templates))
+	for index, item := range templates {
+		if strings.TrimSpace(item.YAML) == "" {
+			return nil, true, fmt.Errorf("compiled manifest template %d is empty", index)
+		}
+		content, err := executeCompiledManifestTemplate(item.YAML, data)
+		if err != nil {
+			return nil, true, fmt.Errorf("render compiled manifest template %q: %w", item.Path, err)
+		}
+		path, err := executeCompiledManifestTemplate(item.Path, data)
+		if err != nil {
+			return nil, true, fmt.Errorf("render compiled manifest path %q: %w", item.Path, err)
+		}
+		if strings.TrimSpace(path) == "" {
+			path = fmt.Sprintf("templates/%s/%s-%s.yaml", environment.Namespace, strings.ToLower(item.Kind), item.Name)
+		}
+		manifests = append(manifests, Manifest{Path: path, Kind: item.Kind, Content: []byte(content)})
+	}
+	sort.Slice(manifests, func(i, j int) bool { return manifests[i].Path < manifests[j].Path })
+	return manifests, true, nil
+}
+
+func executeCompiledManifestTemplate(source string, data map[string]any) (string, error) {
+	parsed, err := template.New("compiled-manifest").Option("missingkey=error").Parse(source)
+	if err != nil {
+		return "", err
+	}
+	var output bytes.Buffer
+	if err := parsed.Execute(&output, data); err != nil {
+		return "", err
+	}
+	return output.String(), nil
+}
+
+func compiledManifestTemplateData(environment domain.Environment) map[string]any {
+	projectID := strings.TrimSpace(environment.Project)
+	environmentID := strings.TrimSpace(environment.ID)
+	return map[string]any{
+		"PRNumber":  strings.TrimSpace(environment.Source.PullRequestID),
+		"MRNumber":  strings.TrimSpace(environment.Source.PullRequestID),
+		"CommitSHA": strings.TrimSpace(environment.Source.Commit),
+		"Branch":    strings.TrimSpace(environment.Source.Branch),
+		"project": map[string]any{
+			"id":   projectID,
+			"name": projectID,
+		},
+		"environment": map[string]any{
+			"id":   environmentID,
+			"name": environmentID,
+		},
+	}
 }
 
 func (b *manifestBackend) Apply(context.Context, domain.Environment, domain.ProjectConfig) error {
