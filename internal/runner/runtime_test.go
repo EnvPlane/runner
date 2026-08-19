@@ -552,14 +552,14 @@ func TestValidateRunnerHelmChartUsesTargetRunnerHelmForPrivateOCIChart(t *testin
 
 func TestValidateRunnerHelmChartPassesPinnedVersion(t *testing.T) {
 	var got []string
-	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://ghcr.io/envpilot/envpilot-e2e-workload", "0.1.0-main.38", func(_ context.Context, args ...string) ([]byte, error) {
+	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://ghcr.io/EnvPlane/envpilot-e2e-workload", "0.1.0-main.38", func(_ context.Context, args ...string) ([]byte, error) {
 		got = args
 		return []byte("apiVersion: v2\nname: envpilot-e2e-workload\n"), nil
 	})
 	if err != nil {
 		t.Fatalf("validate chart: %v", err)
 	}
-	if strings.Join(got, " ") != "show chart oci://ghcr.io/envpilot/envpilot-e2e-workload --version 0.1.0-main.38" {
+	if strings.Join(got, " ") != "show chart oci://ghcr.io/EnvPlane/envpilot-e2e-workload --version 0.1.0-main.38" {
 		t.Fatalf("helm arguments = %q", got)
 	}
 }
