@@ -25,6 +25,14 @@ type fakeRunnerCommandBackend struct {
 	status domain.EnvironmentStatus
 }
 
+func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCommand {
+	command.ReleasePlanID = "release-plan-test"
+	command.ReleasePlanDigest = "sha256:release-plan-test"
+	command.ReleasePlanSignature = "signature-test"
+	command.ReleasePlanKeyID = "key-test"
+	return command
+}
+
 func (b fakeRunnerCommandBackend) Render(context.Context, domain.Environment, domain.ProjectConfig) ([]orchestrator.Manifest, error) {
 	return nil, nil
 }
@@ -589,10 +597,10 @@ func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 }
 
 func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
-	result := executeRunnerCommandWithBackend(context.Background(), domain.RunnerCommand{
+	result := executeRunnerCommandWithBackend(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "status-target-cluster", Operation: "status",
 		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envpilot-pr-42"},
-	}, fakeRunnerCommandBackend{status: domain.StatusReady})
+	}), fakeRunnerCommandBackend{status: domain.StatusReady})
 	if result.Status != "succeeded" || result.EnvironmentStatus != string(domain.StatusReady) {
 		t.Fatalf("status result = %#v", result)
 	}
@@ -604,10 +612,10 @@ func TestRunnerRejectsHelmCommandOutsideChartManagedNamespaceRBAC(t *testing.T) 
 		FeatureEnvWriterMode:       "generatedFeatureNamespaces",
 		FeatureEnvWriterNamespaces: []string{"envpilot-e2e-feature"},
 	}
-	result := executeRunnerCommandWithNamespaceGuard(context.Background(), domain.RunnerCommand{
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "forbidden-target", Operation: "create",
 		Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envpilot-pr-201"},
-	}, fakeRunnerCommandBackend{}, cfg.canRunHelmInNamespace)
+	}), fakeRunnerCommandBackend{}, cfg.canRunHelmInNamespace)
 	if result.ErrorCode != "runner_namespace_access_denied" || !strings.Contains(result.Error, "envpilot-pr-201") {
 		t.Fatalf("forbidden target result = %#v", result)
 	}
@@ -620,10 +628,10 @@ func TestRunnerAllowsHelmLifecycleOnlyInConfiguredTargetNamespace(t *testing.T) 
 	}
 	for _, operation := range []string{"create", "recreate", "status", "delete", "force_cleanup"} {
 		t.Run(operation, func(t *testing.T) {
-			result := executeRunnerCommandWithNamespaceGuard(context.Background(), domain.RunnerCommand{
+			result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 				ID: "allowed-" + operation, Operation: operation,
 				Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envpilot-pr-201"},
-			}, fakeRunnerCommandBackend{status: domain.StatusReady}, cfg.canRunHelmInNamespace)
+			}), fakeRunnerCommandBackend{status: domain.StatusReady}, cfg.canRunHelmInNamespace)
 			if result.Status != "succeeded" || result.ErrorCode != "" {
 				t.Fatalf("%s result = %#v", operation, result)
 			}
