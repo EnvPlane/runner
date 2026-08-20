@@ -12,6 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
       - run: ./scripts/test-check-brand.sh
-      - run: ./scripts/check-brand.sh
+      - name: Check new human-readable brand usage
+        run: ./scripts/check-brand.sh --diff-base
 
