@@ -1464,20 +1464,12 @@ func getenvInt(key string, fallback int) int {
 }
 
 func legacyDiagnostics() []string {
-	seen := map[string]bool{}
-	result := []string{}
-	for _, entry := range os.Environ() {
-		name, _, ok := strings.Cut(entry, "=")
-		if !ok || !strings.HasPrefix(name, "ENVPLANE_") {
-			continue
-		}
-		item := "deprecated:" + name
-		if !seen[item] {
-			seen[item] = true
-			result = append(result, item)
-		}
-	}
-	return result
+	// All runner environment variables use the canonical ENVPLANE_* namespace.
+	// Do not classify that namespace as legacy: doing so made every normal chart
+	// deployment emit a misleading deprecation warning. Keep this hook so a
+	// future, explicitly supported alias can be reported without changing the
+	// runtime configuration path.
+	return nil
 }
 
 func maxInt(left int, right int) int {

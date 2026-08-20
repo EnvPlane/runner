@@ -369,7 +369,7 @@ func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
 	}
 }
 
-func TestRunnerConfigCanonicalAliasesAndLegacyFallback(t *testing.T) {
+func TestRunnerConfigUsesCanonicalEnvironment(t *testing.T) {
 	for _, name := range []string{"ENVPLANE_PROJECT_ID", "ENVPLANE_PROJECT_ID", "ENVPLANE_CLUSTER_ID", "ENVPLANE_CLUSTER_ID", "ENVPLANE_RUNNER_ID", "ENVPLANE_RUNNER_ID"} {
 		t.Setenv(name, "")
 		_ = os.Unsetenv(name)
@@ -377,9 +377,9 @@ func TestRunnerConfigCanonicalAliasesAndLegacyFallback(t *testing.T) {
 	t.Setenv("ENVPLANE_PROJECT_ID", "legacy-project")
 	t.Setenv("ENVPLANE_CLUSTER_ID", "legacy-cluster")
 	t.Setenv("ENVPLANE_RUNNER_ID", "legacy-runner")
-	legacy := runnerConfigFromEnv()
-	if legacy.ProjectID != "legacy-project" || len(legacy.EnvDiagnostics) == 0 {
-		t.Fatalf("legacy runner configuration not loaded safely: %#v", legacy)
+	cfg := runnerConfigFromEnv()
+	if cfg.ProjectID != "legacy-project" || len(cfg.EnvDiagnostics) != 0 {
+		t.Fatalf("canonical runner configuration diagnostics = %#v", cfg.EnvDiagnostics)
 	}
 	t.Setenv("ENVPLANE_PROJECT_ID", "canonical-project")
 	if got := runnerConfigFromEnv().ProjectID; got != "canonical-project" {
