@@ -440,6 +440,20 @@ func TestPollRunnerCommandsOnceDegradesAndStopsForMissingEndpoint(t *testing.T) 
 	}
 }
 
+func TestRunnerHealthRecoversFromTransientDegradedState(t *testing.T) {
+	health := &runnerHealth{}
+
+	health.setDegraded()
+	if health.online.Load() || !health.degraded.Load() {
+		t.Fatal("expected runner health to be degraded")
+	}
+
+	health.set(true)
+	if !health.online.Load() || health.degraded.Load() {
+		t.Fatal("successful recovery must clear degraded runner health")
+	}
+}
+
 func TestPollRunnerCommandsOnceStopsForMissingBootstrapSession(t *testing.T) {
 	polls := 0
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {

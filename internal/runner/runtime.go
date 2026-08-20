@@ -438,6 +438,11 @@ type runnerHealth struct {
 
 func (h *runnerHealth) set(online bool) {
 	h.online.Store(online)
+	if online {
+		// A transient control-plane outage must not leave the runner degraded
+		// forever after connectivity and heartbeat recovery.
+		h.degraded.Store(false)
+	}
 }
 
 func (h *runnerHealth) setDegraded() {
