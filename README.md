@@ -21,14 +21,14 @@ runner-local migrations. In the assembled workspace, verify this invariant with
 `deploy/scripts/check-schema-ownership.sh --root .`. The canonical OpenAPI
 document is owned by contracts.
 
-When running SQL integration tests, set `ENVPILOT_MIGRATIONS_DIR` to the
+When running SQL integration tests, set `ENVPLANE_MIGRATIONS_DIR` to the
 control-plane `migrations/postgres` artifact and set
-`ENVPILOT_TEST_DATABASE_SCHEMA_READY=1` after that artifact has been applied.
+`ENVPLANE_TEST_DATABASE_SCHEMA_READY=1` after that artifact has been applied.
 
 ## Development
 
 ```bash
-go run ./cmd/envpilot-runner
+go run ./cmd/envplane-runner
 go test ./...
 go build ./...
 docker build -t envplane-runner:dev .

@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 func TestFluxRendererUsesObservedFeatureEnvironmentPattern(t *testing.T) {
@@ -197,17 +197,17 @@ func TestFluxRendererGeneratesNamespaceManifest(t *testing.T) {
 	yaml := string(content)
 	assertContains(t, yaml, "apiVersion: v1")
 	assertContains(t, yaml, "kind: Namespace")
-	assertContains(t, yaml, "metadata:\n  name: envpilot-pr-123")
-	assertContains(t, yaml, "envpilot.io/environment-id: feature-checkout")
+	assertContains(t, yaml, "metadata:\n  name: envplane-pr-123")
+	assertContains(t, yaml, "envplane.io/environment-id: feature-checkout")
 	assertContains(t, yaml, "kind: ResourceQuota")
-	assertContains(t, yaml, "name: envpilot-preview-quota")
-	assertContains(t, yaml, "namespace: envpilot-pr-123")
+	assertContains(t, yaml, "name: envplane-preview-quota")
+	assertContains(t, yaml, "namespace: envplane-pr-123")
 	assertContains(t, yaml, `requests.cpu: "2"`)
 	assertContains(t, yaml, "requests.memory: 4Gi")
 	assertContains(t, yaml, `limits.cpu: "4"`)
 	assertContains(t, yaml, "limits.memory: 8Gi")
 	assertContains(t, yaml, "kind: LimitRange")
-	assertContains(t, yaml, "name: envpilot-preview-limits")
+	assertContains(t, yaml, "name: envplane-preview-limits")
 	assertContains(t, yaml, "default:")
 	assertContains(t, yaml, "cpu: 500m")
 	assertContains(t, yaml, "memory: 512Mi")
@@ -295,7 +295,7 @@ func TestFluxRendererGeneratesHelmReleaseManifestSet(t *testing.T) {
 		ID:        "pr-42",
 		Project:   "checkout",
 		Product:   "payments",
-		Namespace: "envpilot-pr-42",
+		Namespace: "envplane-pr-42",
 		Mode:      domain.ModeFull,
 		GitOps: domain.GitOpsTarget{
 			Renderer:      "helm",
@@ -338,7 +338,7 @@ func TestFluxRendererPassesImageTagValuesToHelmTemplate(t *testing.T) {
 		ID:        "pr-43",
 		Project:   "checkout",
 		Product:   "payments",
-		Namespace: "envpilot-pr-43",
+		Namespace: "envplane-pr-43",
 		GitOps: domain.GitOpsTarget{
 			Renderer: "helm",
 			Path:     "charts/payments",
@@ -369,7 +369,7 @@ func TestFluxRendererGeneratesRawManifestSet(t *testing.T) {
 		ID:        "pr-77",
 		Project:   "checkout",
 		Product:   "payments",
-		Namespace: "envpilot-pr-77",
+		Namespace: "envplane-pr-77",
 		Domain:    "pr-77.checkout.preview.example.com",
 		Mode:      domain.ModeFull,
 		GitOps: domain.GitOpsTarget{
@@ -398,7 +398,7 @@ func TestFluxRendererRawManifestIngressUsesPreviewHost(t *testing.T) {
 		ID:        "pr-123",
 		Project:   "checkout",
 		Product:   "generic",
-		Namespace: "envpilot-pr-123",
+		Namespace: "envplane-pr-123",
 		Domain:    "pr-123.checkout.preview.local",
 		Services: []domain.ServiceOverride{
 			{Name: "api", Tag: "abc123"},
@@ -417,7 +417,7 @@ func TestFluxRendererRawHybridManifestsDeployOnlyOverrideServices(t *testing.T) 
 		ID:        "pr-124",
 		Project:   "checkout",
 		Product:   "generic",
-		Namespace: "envpilot-pr-124",
+		Namespace: "envplane-pr-124",
 		Domain:    "pr-124.checkout.preview.local",
 		Mode:      domain.ModeHybrid,
 		Base: domain.BaseEnvironment{
@@ -449,7 +449,7 @@ func TestFluxRendererGeneratesKustomizeOverlayManifestSet(t *testing.T) {
 		ID:        "pr-78",
 		Project:   "checkout",
 		Product:   "payments",
-		Namespace: "envpilot-pr-78",
+		Namespace: "envplane-pr-78",
 		Domain:    "pr-78.checkout.preview.example.com",
 		Mode:      domain.ModeFull,
 		GitOps: domain.GitOpsTarget{
@@ -479,7 +479,7 @@ func TestFluxRendererValuesPreviewMergesSubstitutions(t *testing.T) {
 		ID:        "pr-79",
 		Project:   "checkout",
 		Product:   "payments",
-		Namespace: "envpilot-pr-79",
+		Namespace: "envplane-pr-79",
 		Domain:    "pr-79.checkout.preview.example.com",
 		Services: []domain.ServiceOverride{
 			{Name: "api", Tag: "abc123"},
@@ -512,7 +512,7 @@ func TestFluxRendererManifestTemplatesAreValidYAML(t *testing.T) {
 				ID:        "pr-90",
 				Project:   "checkout",
 				Product:   "payments",
-				Namespace: "envpilot-pr-90",
+				Namespace: "envplane-pr-90",
 				Domain:    "pr-90.checkout.preview.example.com",
 				Mode:      domain.ModeHybrid,
 				GitOps: domain.GitOpsTarget{
@@ -529,7 +529,7 @@ func TestFluxRendererManifestTemplatesAreValidYAML(t *testing.T) {
 				ID:        "pr-91",
 				Project:   "checkout",
 				Product:   "payments",
-				Namespace: "envpilot-pr-91",
+				Namespace: "envplane-pr-91",
 				Domain:    "pr-91.checkout.preview.example.com",
 				Mode:      domain.ModeFull,
 				GitOps: domain.GitOpsTarget{
@@ -548,7 +548,7 @@ func TestFluxRendererManifestTemplatesAreValidYAML(t *testing.T) {
 				ID:        "pr-92",
 				Project:   "checkout",
 				Product:   "payments",
-				Namespace: "envpilot-pr-92",
+				Namespace: "envplane-pr-92",
 				Domain:    "pr-92.checkout.preview.example.com",
 				Mode:      domain.ModeFull,
 				GitOps: domain.GitOpsTarget{
@@ -565,7 +565,7 @@ func TestFluxRendererManifestTemplatesAreValidYAML(t *testing.T) {
 				ID:        "pr-93",
 				Project:   "checkout",
 				Product:   "payments",
-				Namespace: "envpilot-pr-93",
+				Namespace: "envplane-pr-93",
 				Domain:    "pr-93.checkout.preview.example.com",
 				Mode:      domain.ModeFull,
 				GitOps: domain.GitOpsTarget{

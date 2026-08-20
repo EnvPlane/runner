@@ -41,9 +41,9 @@ jobs:
       - id: source_read_auth
         name: Select source checkout authentication
         env:
-          CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          FALLBACK_PAT: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
+          CLIENT_ID: ${{ secrets.ENVPLANE_AUTOMATION_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPLANE_AUTOMATION_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPLANE_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           if [[ -n "$CLIENT_ID" && -n "$APP_PRIVATE_KEY" ]]; then
@@ -58,34 +58,34 @@ jobs:
       - id: source_read_app
         if: steps.source_read_auth.outputs.method == 'app'
         env:
-          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          ENVPLANE_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPLANE_AUTOMATION_APP_CLIENT_ID }}
+          ENVPLANE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPLANE_AUTOMATION_APP_PRIVATE_KEY }}
           GH_APP_OWNER: ${{ github.repository_owner }}
           GH_APP_REPOSITORY: deploy
           GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
         run: ./runner/scripts/obtain-github-app-token.sh
       - name: Configure private Go modules
         env:
-          SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+          SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPLANE_AUTOMATION_PAT }}
         run: |
-          echo 'GOPRIVATE=github.com/envpilot/*' >> "$GITHUB_ENV"
+          echo 'GOPRIVATE=github.com/envplane/*' >> "$GITHUB_ENV"
           git config --global url."https://x-access-token:${SOURCE_TOKEN}@github.com/".insteadOf "https://github.com/"
       - uses: actions/checkout@v7
         with:
           repository: EnvPlane/bootstrap
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPLANE_AUTOMATION_PAT }}
           path: bootstrap
           ref: main
       - uses: actions/checkout@v7
         with:
           repository: EnvPlane/deploy
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPLANE_AUTOMATION_PAT }}
           path: deploy
           ref: main
       - uses: actions/checkout@v7
         with:
           repository: EnvPlane/frontend
-          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+          token: ${{ steps.source_read_app.outputs.token || secrets.ENVPLANE_AUTOMATION_PAT }}
           path: frontend
           ref: main
       - name: Ensure Go toolchain
@@ -97,8 +97,8 @@ jobs:
       - name: Use published runtime modules
         working-directory: runner
         run: |
-          go mod edit -dropreplace=github.com/envpilot/contracts
-          go mod edit -dropreplace=github.com/envpilot/gitops
+          go mod edit -dropreplace=github.com/envplane/contracts
+          go mod edit -dropreplace=github.com/envplane/gitops
           go mod tidy
       - name: Test runner
         working-directory: runner
@@ -132,7 +132,7 @@ jobs:
           cache-from: type=gha,scope=runner
           cache-to: type=gha,mode=max,scope=runner
           secrets: |
-            github_token=${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
+            github_token=${{ steps.source_read_app.outputs.token || secrets.ENVPLANE_AUTOMATION_PAT }}
           provenance: mode=max
           sbom: true
       - name: Scan published image for high and critical vulnerabilities
@@ -177,9 +177,9 @@ jobs:
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         name: Select deploy dispatch authentication
         env:
-          CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          FALLBACK_PAT: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
+          CLIENT_ID: ${{ secrets.ENVPLANE_AUTOMATION_APP_CLIENT_ID }}
+          APP_PRIVATE_KEY: ${{ secrets.ENVPLANE_AUTOMATION_APP_PRIVATE_KEY }}
+          FALLBACK_PAT: ${{ secrets.ENVPLANE_AUTOMATION_PAT }}
         run: |
           set -euo pipefail
           if [[ -n "$CLIENT_ID" && -n "$APP_PRIVATE_KEY" ]]; then
@@ -194,8 +194,8 @@ jobs:
       - id: deploy_dispatch_app
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'app'
         env:
-          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
+          ENVPLANE_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPLANE_AUTOMATION_APP_CLIENT_ID }}
+          ENVPLANE_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPLANE_AUTOMATION_APP_PRIVATE_KEY }}
           GH_APP_OWNER: ${{ github.repository_owner }}
           GH_APP_REPOSITORY: deploy
           GH_APP_TOKEN_PERMISSIONS: '{"contents":"write"}'
@@ -219,7 +219,7 @@ jobs:
       - name: Dispatch immutable image update with PAT fallback
         if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && steps.dispatch_auth.outputs.method == 'pat'
         env:
-          GH_TOKEN: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
+          GH_TOKEN: ${{ secrets.ENVPLANE_AUTOMATION_PAT }}
           METADATA: ${{ steps.published.outputs.metadata }}
         run: |
           set -euo pipefail

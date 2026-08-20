@@ -16,8 +16,8 @@ func TestCommitServiceCommitsChangesIdempotently(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	service := NewCommitService(repo, false, "", "main", "envpilot", "envpilot@example.com")
-	first, err := service.Commit(context.Background(), "envpilot: test commit")
+	service := NewCommitService(repo, false, "", "main", "envplane", "envplane@example.com")
+	first, err := service.Commit(context.Background(), "envplane: test commit")
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestCommitServiceCommitsChangesIdempotently(t *testing.T) {
 		t.Fatal("expected commit sha")
 	}
 
-	second, err := service.Commit(context.Background(), "envpilot: no-op")
+	second, err := service.Commit(context.Background(), "envplane: no-op")
 	if err != nil {
 		t.Fatalf("second commit: %v", err)
 	}
@@ -47,8 +47,8 @@ func TestCommitServicePushesConfiguredBranch(t *testing.T) {
 		t.Fatalf("write manifest: %v", err)
 	}
 
-	service := NewCommitService(repo, true, "origin", "envpilot/test", "envpilot", "envpilot@example.com")
-	result, err := service.Commit(context.Background(), "envpilot: push test")
+	service := NewCommitService(repo, true, "origin", "envplane/test", "envplane", "envplane@example.com")
+	result, err := service.Commit(context.Background(), "envplane: push test")
 	if err != nil {
 		t.Fatalf("commit push: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestCommitServicePushesConfiguredBranch(t *testing.T) {
 	}
 
 	refs := output(t, remote, "git", "show-ref", "--heads")
-	if !strings.Contains(refs, "refs/heads/envpilot/test") {
+	if !strings.Contains(refs, "refs/heads/envplane/test") {
 		t.Fatalf("expected pushed branch, refs:\n%s", refs)
 	}
 }
@@ -90,8 +90,8 @@ func TestCommitServicePushConflictReturnsConflictError(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(second, "second.txt"), []byte("second\n"), 0o644); err != nil {
 		t.Fatalf("write second: %v", err)
 	}
-	service := NewCommitService(second, true, "origin", "main", "envpilot", "envpilot@example.com")
-	_, err := service.Commit(context.Background(), "envpilot: conflicting push")
+	service := NewCommitService(second, true, "origin", "main", "envplane", "envplane@example.com")
+	_, err := service.Commit(context.Background(), "envplane: conflicting push")
 	if err == nil {
 		t.Fatal("expected conflict on push")
 	}

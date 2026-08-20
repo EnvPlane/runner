@@ -11,7 +11,7 @@ GOTOOLCHAIN=local GOSUMDB=off GOPROXY=off go list -deps ./cmd/... >"$deps"
 status=0
 for directory in internal/*; do
 	[[ -d "$directory" ]] || continue
-	package="github.com/envpilot/runner/$directory"
+	package="github.com/envplane/runner/$directory"
 	if ! grep -Fq "$package" "$deps"; then
 		echo "production entrypoint does not reach $package" >&2
 		status=1

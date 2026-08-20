@@ -15,9 +15,9 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/runner/internal/gitops"
-	"github.com/envpilot/runner/internal/store"
+	"github.com/envplane/contracts/domain"
+	"github.com/envplane/runner/internal/gitops"
+	"github.com/envplane/runner/internal/store"
 	"gopkg.in/yaml.v3"
 )
 
@@ -240,14 +240,14 @@ func (e *CLIHelmExecutor) IsNamespaceManaged(ctx context.Context, namespace, pro
 	}
 	projectID = strings.TrimSpace(projectID)
 	environmentID = strings.TrimSpace(environmentID)
-	managedOK := strings.TrimSpace(labels["envpilot.io/managed"]) == "true"
+	managedOK := strings.TrimSpace(labels["envplane.io/managed"]) == "true"
 	projectOK := true
 	environmentOK := true
 	if projectID != "" {
-		projectOK = strings.TrimSpace(labels["envpilot.io/project-id"]) == projectID
+		projectOK = strings.TrimSpace(labels["envplane.io/project-id"]) == projectID
 	}
 	if environmentID != "" {
-		environmentOK = strings.TrimSpace(labels["envpilot.io/environment-id"]) == environmentID
+		environmentOK = strings.TrimSpace(labels["envplane.io/environment-id"]) == environmentID
 	}
 	return managedOK && projectOK && environmentOK, nil
 }
@@ -542,7 +542,7 @@ func (b *HelmDirectBackend) helmValuesFile(environment domain.Environment) (stri
 	for _, item := range values {
 		valuesObject[item.Name] = item.Value
 	}
-	f, err := os.CreateTemp("", "envpilot-helm-direct-values-*.yaml")
+	f, err := os.CreateTemp("", "envplane-helm-direct-values-*.yaml")
 	if err != nil {
 		return "", nil, err
 	}
@@ -644,9 +644,9 @@ func (b *HelmDirectBackend) renderHelmDirectManifest(environment domain.Environm
 
 func (b *HelmDirectBackend) renderManagedLabels(projectID, environmentID string) []helmDirectValue {
 	return []helmDirectValue{
-		{Name: "envpilot.io/project-id", Value: projectID},
-		{Name: "envpilot.io/environment-id", Value: environmentID},
-		{Name: "envpilot.io/managed", Value: "true"},
+		{Name: "envplane.io/project-id", Value: projectID},
+		{Name: "envplane.io/environment-id", Value: environmentID},
+		{Name: "envplane.io/managed", Value: "true"},
 	}
 }
 
@@ -1087,7 +1087,7 @@ func (b *FluxBackend) ApplyWithWriter(ctx context.Context, environment domain.En
 	if writer == nil {
 		return gitops.CommitResult{}, fmt.Errorf("gitops writer is required for flux backend apply")
 	}
-	return writer.Commit(ctx, "envpilot: create "+environment.ID)
+	return writer.Commit(ctx, "envplane: create "+environment.ID)
 }
 
 func (b *FluxBackend) Delete(context.Context, domain.Environment, domain.ProjectConfig) error {
@@ -1100,10 +1100,10 @@ func (b *FluxBackend) DeleteWithWriter(ctx context.Context, environment domain.E
 	if writer == nil {
 		return gitops.CommitResult{}, fmt.Errorf("gitops writer is required for flux backend delete")
 	}
-	if err := writer.RemovePath(ctx, environment.GitOpsDirectory(), "envpilot: delete manifests "+environment.ID); err != nil {
+	if err := writer.RemovePath(ctx, environment.GitOpsDirectory(), "envplane: delete manifests "+environment.ID); err != nil {
 		return gitops.CommitResult{}, err
 	}
-	return writer.Commit(ctx, "envpilot: delete "+environment.ID)
+	return writer.Commit(ctx, "envplane: delete "+environment.ID)
 }
 
 func (b *FluxBackend) Status(_ context.Context, environment domain.Environment, _ domain.ProjectConfig) (domain.EnvironmentStatus, error) {
@@ -1405,7 +1405,7 @@ func (o *EnvironmentOrchestrator) CreateWithWriterAndProjectConfig(ctx context.C
 	environment.LastError = ""
 	environment.UpdatedAt = o.now()
 	for _, manifest := range manifests {
-		path, err := writer.WriteManifest(ctx, manifest.Path, manifest.Content, "envpilot: create "+environment.ID+" "+manifest.Kind)
+		path, err := writer.WriteManifest(ctx, manifest.Path, manifest.Content, "envplane: create "+environment.ID+" "+manifest.Kind)
 		if err != nil {
 			environment.Status = domain.StatusFailed
 			environment.LastError = err.Error()
@@ -1442,7 +1442,7 @@ func (o *EnvironmentOrchestrator) CreateWithWriterAndProjectConfig(ctx context.C
 			_ = o.store.Save(environment)
 			return environment, err
 		}
-		commit, err := writer.Commit(ctx, "envpilot: create "+environment.ID)
+		commit, err := writer.Commit(ctx, "envplane: create "+environment.ID)
 		if err != nil {
 			environment.Status = domain.StatusFailed
 			environment.LastError = err.Error()
@@ -1522,14 +1522,14 @@ func (o *EnvironmentOrchestrator) DeleteWithWriterAndProjectConfig(ctx context.C
 			_ = o.store.Save(environment)
 			return environment, err
 		}
-		if err := writer.RemovePath(ctx, environment.GitOpsDirectory(), "envpilot: delete manifests "+environment.ID); err != nil {
+		if err := writer.RemovePath(ctx, environment.GitOpsDirectory(), "envplane: delete manifests "+environment.ID); err != nil {
 			environment.Status = domain.StatusDeleteFailed
 			environment.LastError = err.Error()
 			environment.UpdatedAt = o.now()
 			_ = o.store.Save(environment)
 			return environment, err
 		}
-		commit, err := writer.Commit(ctx, "envpilot: delete "+environment.ID)
+		commit, err := writer.Commit(ctx, "envplane: delete "+environment.ID)
 		if err != nil {
 			environment.Status = domain.StatusDeleteFailed
 			environment.LastError = err.Error()

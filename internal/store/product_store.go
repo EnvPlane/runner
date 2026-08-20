@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 var ErrProductNotFound = errors.New("product template not found")
