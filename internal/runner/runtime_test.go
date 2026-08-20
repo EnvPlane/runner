@@ -105,6 +105,27 @@ func TestNextRunnerCommandClassifiesEndpointAndAuthenticationFailures(t *testing
 	}
 }
 
+func TestNextRunnerCommandClassifiesUnissuedRuntimeTokenForRecovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"error":"runner auth token is not issued for project \"envpilot\""}`)),
+			Request:    request,
+		}, nil
+	})}
+	_, _, err := nextRunnerCommand(context.Background(), runnerConfig{
+		ControlPlaneURL: "http://runner.test",
+		ProjectID:       "envpilot",
+		ClusterID:       "local",
+		RunnerID:        "runner-1",
+		RunnerAuthToken: "stale-token",
+	}, client)
+	if err == nil || !isRunnerAuthTokenNotIssuedError(err) {
+		t.Fatalf("nextRunnerCommand error = %v, want runtime-token recovery error", err)
+	}
+}
+
 func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
 	cfg := runnerConfig{
 		ControlPlaneURL:          "https://host.minikube.internal:18080",

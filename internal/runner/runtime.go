@@ -502,9 +502,10 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 // particular, a runner must not overwrite a detected command API incompatibility
 // with a later "online" heartbeat.
 type runnerRuntimeState struct {
-	status atomic.Value
-	error  atomic.Value
-	stale  atomic.Bool
+	status                atomic.Value
+	error                 atomic.Value
+	stale                 atomic.Bool
+	authRecoveryRequested atomic.Bool
 }
 
 func newRunnerRuntimeState() *runnerRuntimeState {
@@ -644,6 +645,7 @@ func prepareRunnerFixtureRecovery(cfg runnerConfig, logger *slog.Logger) {
 
 func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
 	backoff := time.Second
+	bootstrapRegistrationToken := cfg.RegistrationToken
 	for {
 		select {
 		case <-ctx.Done():
@@ -654,6 +656,24 @@ func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Clien
 			}
 			keepPolling, found := pollRunnerCommandsOnceWithFound(ctx, cfg, client, state, health, logger)
 			if !keepPolling {
+				if state.authRecoveryRequested.Swap(false) && strings.TrimSpace(bootstrapRegistrationToken) != "" {
+					logger.Warn("persisted runner auth token was rejected during command polling; re-registering with bootstrap credentials", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
+					if err := clearRuntimeToken(cfg.RunnerAuthTokenFile); err != nil {
+						logger.Error("clear rejected runner auth token", "error", err)
+						return
+					}
+					cfg.RunnerAuthToken = ""
+					cfg.RegistrationToken = bootstrapRegistrationToken
+					var err error
+					cfg, _, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
+					if err != nil {
+						logger.Error("runner auth recovery registration failed", "error", err)
+						return
+					}
+					health.set(true)
+					backoff = time.Second
+					continue
+				}
 				return
 			}
 			if found {
@@ -691,6 +711,10 @@ func pollRunnerCommandsOnceWithFound(ctx context.Context, cfg runnerConfig, clie
 				logger.Error("runner command API incompatible and degraded heartbeat failed", "error", heartbeatErr)
 			}
 			logger.Error("runner command API incompatible; command polling disabled", "error", err)
+			return false, false
+		}
+		if isRunnerAuthTokenNotIssuedError(err) {
+			state.authRecoveryRequested.Store(true)
 			return false, false
 		}
 		if isRunnerCommandAuthenticationError(err) {
@@ -877,6 +901,9 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 			return domain.RunnerCommand{}, false, runnerCommandEndpointMissingError{detail: detail}
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+			if resp.StatusCode == http.StatusUnauthorized && strings.Contains(strings.ToLower(string(body)), "token is not issued") {
+				return domain.RunnerCommand{}, false, runnerAPIError{status: resp.StatusCode, code: "runner_auth_token_not_issued", detail: detail}
+			}
 			return domain.RunnerCommand{}, false, runnerCommandAuthenticationError{detail: detail}
 		}
 		if resp.StatusCode == http.StatusUpgradeRequired {
