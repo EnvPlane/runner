@@ -25,9 +25,9 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/contracts/sdk/go/envplanesdk"
-	"github.com/envpilot/runner/internal/orchestrator"
+	"github.com/envplane/contracts/domain"
+	"github.com/envplane/contracts/sdk/go/envplanesdk"
+	"github.com/envplane/runner/internal/orchestrator"
 )
 
 const (
@@ -65,9 +65,9 @@ type runnerConfig struct {
 }
 
 func runnerConfigFromEnv() runnerConfig {
-	authTokenFile := getenv("ENVPILOT_RUNNER_AUTH_TOKEN_FILE", "")
-	registrationToken := getenv("ENVPILOT_RUNNER_REGISTRATION_TOKEN", "")
-	authToken := getenv("ENVPILOT_RUNNER_AUTH_TOKEN", "")
+	authTokenFile := getenv("ENVPLANE_RUNNER_AUTH_TOKEN_FILE", "")
+	registrationToken := getenv("ENVPLANE_RUNNER_REGISTRATION_TOKEN", "")
+	authToken := getenv("ENVPLANE_RUNNER_AUTH_TOKEN", "")
 	if strings.TrimSpace(authToken) == "" {
 		authToken = readRuntimeTokenFile(authTokenFile)
 	}
@@ -80,31 +80,31 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	cfg := runnerConfig{
-		ControlPlaneURL:                      strings.TrimRight(getenv("ENVPILOT_CONTROL_PLANE_URL", ""), "/"),
-		ControlPlaneEndpointMode:             strings.TrimSpace(getenv("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
-		ControlPlaneCAFile:                   getenv("ENVPILOT_CONTROL_PLANE_CA_FILE", ""),
-		ControlPlaneTLSServerName:            getenv("ENVPILOT_CONTROL_PLANE_TLS_SERVER_NAME", ""),
-		ControlPlaneConnectivityMaxAttempts:  getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_MAX_ATTEMPTS", 12),
-		ControlPlaneConnectivityInitialDelay: time.Duration(getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_INITIAL_BACKOFF_SECONDS", 1)) * time.Second,
-		ControlPlaneConnectivityMaxDelay:     time.Duration(getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_MAX_BACKOFF_SECONDS", 5)) * time.Second,
-		ControlPlaneConnectivityDeadline:     time.Duration(maxInt(5, getenvInt("ENVPILOT_CONTROL_PLANE_CONNECTIVITY_DEADLINE_SECONDS", 120))) * time.Second,
-		RemoteGeneration:                     int64(getenvInt("ENVPILOT_REMOTE_GENERATION", 0)),
-		ProjectID:                            getenv("ENVPILOT_PROJECT_ID", ""),
-		ClusterID:                            getenv("ENVPILOT_CLUSTER_ID", "default"),
-		RunnerID:                             getenv("ENVPILOT_RUNNER_ID", hostnameFallback("envpilot-runner")),
-		RunnerNamespace:                      getenv("ENVPILOT_RUNNER_NAMESPACE", "envpilot-system"),
-		DeploymentMode:                       strings.ToLower(getenv("ENVPILOT_RUNNER_DEPLOYMENT_MODE", "helm")),
+		ControlPlaneURL:                      strings.TrimRight(getenv("ENVPLANE_CONTROL_PLANE_URL", ""), "/"),
+		ControlPlaneEndpointMode:             strings.TrimSpace(getenv("ENVPLANE_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
+		ControlPlaneCAFile:                   getenv("ENVPLANE_CONTROL_PLANE_CA_FILE", ""),
+		ControlPlaneTLSServerName:            getenv("ENVPLANE_CONTROL_PLANE_TLS_SERVER_NAME", ""),
+		ControlPlaneConnectivityMaxAttempts:  getenvInt("ENVPLANE_CONTROL_PLANE_CONNECTIVITY_MAX_ATTEMPTS", 12),
+		ControlPlaneConnectivityInitialDelay: time.Duration(getenvInt("ENVPLANE_CONTROL_PLANE_CONNECTIVITY_INITIAL_BACKOFF_SECONDS", 1)) * time.Second,
+		ControlPlaneConnectivityMaxDelay:     time.Duration(getenvInt("ENVPLANE_CONTROL_PLANE_CONNECTIVITY_MAX_BACKOFF_SECONDS", 5)) * time.Second,
+		ControlPlaneConnectivityDeadline:     time.Duration(maxInt(5, getenvInt("ENVPLANE_CONTROL_PLANE_CONNECTIVITY_DEADLINE_SECONDS", 120))) * time.Second,
+		RemoteGeneration:                     int64(getenvInt("ENVPLANE_REMOTE_GENERATION", 0)),
+		ProjectID:                            getenv("ENVPLANE_PROJECT_ID", ""),
+		ClusterID:                            getenv("ENVPLANE_CLUSTER_ID", "default"),
+		RunnerID:                             getenv("ENVPLANE_RUNNER_ID", hostnameFallback("envplane-runner")),
+		RunnerNamespace:                      getenv("ENVPLANE_RUNNER_NAMESPACE", "envplane-system"),
+		DeploymentMode:                       strings.ToLower(getenv("ENVPLANE_RUNNER_DEPLOYMENT_MODE", "helm")),
 		RegistrationToken:                    registrationToken,
 		RunnerAuthToken:                      authToken,
 		RunnerAuthTokenFile:                  authTokenFile,
-		ProjectConfigURL:                     getenv("ENVPILOT_PROJECT_CONFIG_URL", ""),
-		ProjectConfigToken:                   getenv("ENVPILOT_PROJECT_CONFIG_TOKEN", ""),
-		HeartbeatInterval:                    time.Duration(getenvInt("ENVPILOT_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
-		ReportTimeout:                        time.Duration(getenvInt("ENVPILOT_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
-		HealthAddr:                           getenv("ENVPILOT_RUNNER_HEALTH_ADDR", ":8080"),
-		RunnerVersion:                        getenv("ENVPILOT_RUNNER_VERSION", "dev"),
-		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPILOT_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
-		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES", "")),
+		ProjectConfigURL:                     getenv("ENVPLANE_PROJECT_CONFIG_URL", ""),
+		ProjectConfigToken:                   getenv("ENVPLANE_PROJECT_CONFIG_TOKEN", ""),
+		HeartbeatInterval:                    time.Duration(getenvInt("ENVPLANE_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
+		ReportTimeout:                        time.Duration(getenvInt("ENVPLANE_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
+		HealthAddr:                           getenv("ENVPLANE_RUNNER_HEALTH_ADDR", ":8080"),
+		RunnerVersion:                        getenv("ENVPLANE_RUNNER_VERSION", "dev"),
+		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPLANE_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
+		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPLANE_FEATURE_ENV_WRITER_NAMESPACES", "")),
 	}
 	cfg.EnvDiagnostics = legacyDiagnostics()
 	return cfg
@@ -156,7 +156,7 @@ func (c runnerConfig) canRunHelmInNamespace(namespace string) bool {
 
 func (c runnerConfig) validate() error {
 	if strings.TrimSpace(c.ControlPlaneURL) == "" {
-		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_URL is required")
+		return fmt.Errorf("ENVPLANE_CONTROL_PLANE_URL is required")
 	}
 	if err := validateRunnerControlPlaneEndpoint(c.ControlPlaneURL, c.ControlPlaneEndpointMode); err != nil {
 		return err
@@ -165,29 +165,29 @@ func (c runnerConfig) validate() error {
 		return fmt.Errorf("invalid control-plane TLS configuration: %w", err)
 	}
 	if strings.TrimSpace(c.ProjectID) == "" {
-		return fmt.Errorf("ENVPILOT_PROJECT_ID is required")
+		return fmt.Errorf("ENVPLANE_PROJECT_ID is required")
 	}
 	if strings.TrimSpace(c.ClusterID) == "" {
-		return fmt.Errorf("ENVPILOT_CLUSTER_ID is required")
+		return fmt.Errorf("ENVPLANE_CLUSTER_ID is required")
 	}
 	if strings.TrimSpace(c.RunnerID) == "" {
-		return fmt.Errorf("ENVPILOT_RUNNER_ID is required")
+		return fmt.Errorf("ENVPLANE_RUNNER_ID is required")
 	}
 	if strings.TrimSpace(c.RunnerNamespace) == "" {
-		return fmt.Errorf("ENVPILOT_RUNNER_NAMESPACE is required")
+		return fmt.Errorf("ENVPLANE_RUNNER_NAMESPACE is required")
 	}
 	if strings.TrimSpace(c.DeploymentMode) == "" {
-		return fmt.Errorf("ENVPILOT_RUNNER_DEPLOYMENT_MODE is required")
+		return fmt.Errorf("ENVPLANE_RUNNER_DEPLOYMENT_MODE is required")
 	}
 	mode := strings.TrimSpace(c.FeatureEnvWriterMode)
 	if mode != "releaseNamespace" && mode != "preconfiguredNamespaces" && mode != "generatedFeatureNamespaces" {
-		return fmt.Errorf("ENVPILOT_FEATURE_ENV_WRITER_MODE must be releaseNamespace, preconfiguredNamespaces, or generatedFeatureNamespaces")
+		return fmt.Errorf("ENVPLANE_FEATURE_ENV_WRITER_MODE must be releaseNamespace, preconfiguredNamespaces, or generatedFeatureNamespaces")
 	}
 	if (mode == "preconfiguredNamespaces" || mode == "generatedFeatureNamespaces") && len(c.FeatureEnvWriterNamespaces) == 0 {
-		return fmt.Errorf("ENVPILOT_FEATURE_ENV_WRITER_NAMESPACES is required for %s", mode)
+		return fmt.Errorf("ENVPLANE_FEATURE_ENV_WRITER_NAMESPACES is required for %s", mode)
 	}
 	if strings.TrimSpace(c.RegistrationToken) == "" && strings.TrimSpace(c.RunnerAuthToken) == "" {
-		return fmt.Errorf("set ENVPILOT_RUNNER_REGISTRATION_TOKEN or ENVPILOT_RUNNER_AUTH_TOKEN")
+		return fmt.Errorf("set ENVPLANE_RUNNER_REGISTRATION_TOKEN or ENVPLANE_RUNNER_AUTH_TOKEN")
 	}
 	if c.HeartbeatInterval <= 0 {
 		return fmt.Errorf("heartbeat interval must be positive")
@@ -204,21 +204,21 @@ func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
 		mode = "samecluster"
 	}
 	if mode != "samecluster" && mode != "remote" {
-		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_ENDPOINT_MODE must be sameCluster or remote")
+		return fmt.Errorf("ENVPLANE_CONTROL_PLANE_ENDPOINT_MODE must be sameCluster or remote")
 	}
 	parsed, err := url.Parse(strings.TrimSpace(rawURL))
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Hostname() == "" {
-		return fmt.Errorf("ENVPILOT_CONTROL_PLANE_URL must be an HTTP(S) URL")
+		return fmt.Errorf("ENVPLANE_CONTROL_PLANE_URL must be an HTTP(S) URL")
 	}
 	if mode != "remote" {
 		return nil
 	}
 	if parsed.Scheme != "https" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
-		return fmt.Errorf("remote ENVPILOT_CONTROL_PLANE_URL must be an explicit stable HTTPS URL without credentials, query parameters, or fragments")
+		return fmt.Errorf("remote ENVPLANE_CONTROL_PLANE_URL must be an explicit stable HTTPS URL without credentials, query parameters, or fragments")
 	}
 	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
-	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "envpilot.local" || host == "host.minikube.internal" || strings.HasSuffix(host, ".svc") || strings.Contains(host, ".svc.") {
-		return fmt.Errorf("remote ENVPILOT_CONTROL_PLANE_URL must be target-pod-reachable, not host-local or Kubernetes Service DNS")
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" || host == "envplane.local" || host == "host.minikube.internal" || strings.HasSuffix(host, ".svc") || strings.Contains(host, ".svc.") {
+		return fmt.Errorf("remote ENVPLANE_CONTROL_PLANE_URL must be target-pod-reachable, not host-local or Kubernetes Service DNS")
 	}
 	return nil
 }
@@ -253,7 +253,7 @@ func newRunnerControlPlaneHTTPClientWithTLS(timeout time.Duration, caFile, serve
 func ConnectivityCheck(logger *slog.Logger) {
 	cfg := runnerConfigFromEnv()
 	if strings.TrimSpace(cfg.ControlPlaneURL) == "" {
-		logger.Error("runner control-plane connectivity check failed", "error", "ENVPILOT_CONTROL_PLANE_URL is required")
+		logger.Error("runner control-plane connectivity check failed", "error", "ENVPLANE_CONTROL_PLANE_URL is required")
 		os.Exit(1)
 	}
 	if err := validateRunnerControlPlaneEndpoint(cfg.ControlPlaneURL, cfg.ControlPlaneEndpointMode); err != nil {
@@ -484,7 +484,7 @@ func serveRunnerHealth(ctx context.Context, addr string, health *runnerHealth, l
 		if health.online.Load() {
 			status = 1
 		}
-		_, _ = fmt.Fprintf(w, "# HELP envpilot_runner_up Whether the runner is online.\n# TYPE envpilot_runner_up gauge\nenvpilot_runner_up %d\n", status)
+		_, _ = fmt.Fprintf(w, "# HELP envplane_runner_up Whether the runner is online.\n# TYPE envplane_runner_up gauge\nenvplane_runner_up %d\n", status)
 	})
 	server := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
@@ -1006,7 +1006,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 		}
 		// HelmDirectBackend.Delete is deliberately label-owned: it ignores a
 		// shared namespace and deletes a dedicated namespace only after the
-		// envpilot.io managed/project/environment labels match the command.
+		// envplane.io managed/project/environment labels match the command.
 		// The Runner therefore remains the sole Kubernetes actor even for an
 		// audited force-clean recovery command.
 		err = backend.Delete(ctx, command.Environment, projectConfig)
@@ -1434,8 +1434,8 @@ func hostnameFallback(fallback string) string {
 }
 
 func getenv(key, fallback string) string {
-	if strings.HasPrefix(key, "ENVPILOT_") {
-		canonical := "ENVPLANE_" + strings.TrimPrefix(key, "ENVPILOT_")
+	if strings.HasPrefix(key, "ENVPLANE_") {
+		canonical := "ENVPLANE_" + strings.TrimPrefix(key, "ENVPLANE_")
 		if value, set := os.LookupEnv(canonical); set {
 			return strings.TrimSpace(value)
 		}
@@ -1463,7 +1463,7 @@ func legacyDiagnostics() []string {
 	result := []string{}
 	for _, entry := range os.Environ() {
 		name, _, ok := strings.Cut(entry, "=")
-		if !ok || !strings.HasPrefix(name, "ENVPILOT_") {
+		if !ok || !strings.HasPrefix(name, "ENVPLANE_") {
 			continue
 		}
 		item := "deprecated:" + name

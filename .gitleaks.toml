@@ -3,4 +3,4 @@ title = "EnvPlane runner gitleaks configuration"
 [[allowlists]]
 description = "Deterministic namespace fixture used by Kubernetes ownership tests"
 regexTarget = "secret"
-regexes = ['''envpilot-pr-123''']
+regexes = ['''envplane-pr-123''']

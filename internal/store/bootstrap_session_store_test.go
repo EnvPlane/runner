@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 func TestJSONBootstrapSessionStorePersistsSession(t *testing.T) {

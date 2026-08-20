@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/runner/internal/orchestrator"
+	"github.com/envplane/contracts/domain"
+	"github.com/envplane/runner/internal/orchestrator"
 )
 
 type fakeRunnerCommandBackend struct {
@@ -110,13 +110,13 @@ func TestNextRunnerCommandClassifiesUnissuedRuntimeTokenForRecovery(t *testing.T
 		return &http.Response{
 			StatusCode: http.StatusUnauthorized,
 			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(`{"error":"runner auth token is not issued for project \"envpilot\""}`)),
+			Body:       io.NopCloser(strings.NewReader(`{"error":"runner auth token is not issued for project \"envplane\""}`)),
 			Request:    request,
 		}, nil
 	})}
 	_, _, err := nextRunnerCommand(context.Background(), runnerConfig{
 		ControlPlaneURL: "http://runner.test",
-		ProjectID:       "envpilot",
+		ProjectID:       "envplane",
 		ClusterID:       "local",
 		RunnerID:        "runner-1",
 		RunnerAuthToken: "stale-token",
@@ -133,7 +133,7 @@ func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
 		ProjectID:                "checkout",
 		ClusterID:                "remote-cluster",
 		RunnerID:                 "checkout-runner",
-		RunnerNamespace:          "envpilot",
+		RunnerNamespace:          "envplane",
 		DeploymentMode:           "helm",
 		RunnerAuthToken:          "runner-auth-token",
 		FeatureEnvWriterMode:     "releaseNamespace",
@@ -152,7 +152,7 @@ func TestRunnerConfigRequiresStableHTTPSForRemoteControlPlaneEndpoint(t *testing
 		ProjectID:                "checkout",
 		ClusterID:                "remote-cluster",
 		RunnerID:                 "checkout-runner",
-		RunnerNamespace:          "envpilot",
+		RunnerNamespace:          "envplane",
 		DeploymentMode:           "helm",
 		RunnerAuthToken:          "runner-auth-token",
 		FeatureEnvWriterMode:     "releaseNamespace",
@@ -295,7 +295,7 @@ func TestRunnerPostJSONClassifiesMissingBootstrapSessionForRecovery(t *testing.T
 		}, nil
 	})}
 	err := reportRunnerHeartbeat(context.Background(), runnerConfig{
-		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
+		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envplane", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
 	}, client, string(domain.RunnerHeartbeatStatusOnline), "")
 	if err == nil || !isRunnerStaleBootstrapIdentityError(err) {
 		t.Fatalf("heartbeat error = %v, want stale bootstrap identity", err)
@@ -313,7 +313,7 @@ func TestRunnerPostJSONClassifiesExpiredBootstrapCredentialForRecovery(t *testin
 		}, nil
 	})}
 	err := fetchRunnerProjectConfig(context.Background(), runnerConfig{
-		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", ProjectConfigURL: "http://runner.test/api/v1/projects/checkout/runner-config", ProjectConfigToken: "expired-config-token",
+		ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerNamespace: "envplane", DeploymentMode: "helm", ProjectConfigURL: "http://runner.test/api/v1/projects/checkout/runner-config", ProjectConfigToken: "expired-config-token",
 	}, client, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err == nil || !isRunnerStaleBootstrapIdentityError(err) {
 		t.Fatalf("project config error = %v, want recovery-required expired credential", err)
@@ -330,7 +330,7 @@ func TestRunnerPostJSONClassifiesFixtureIdentityReissueForAutomaticRecovery(t *t
 		}, nil
 	})}
 	err := reportRunnerHeartbeat(context.Background(), runnerConfig{
-		ControlPlaneURL: "http://runner.test", ProjectID: "fixture", ClusterID: "remote", RunnerID: "fixture-runner", RunnerNamespace: "envpilot", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
+		ControlPlaneURL: "http://runner.test", ProjectID: "fixture", ClusterID: "remote", RunnerID: "fixture-runner", RunnerNamespace: "envplane", DeploymentMode: "helm", RunnerAuthToken: "stale-auth",
 	}, client, string(domain.RunnerHeartbeatStatusOnline), "")
 	if err == nil || !isRunnerFixtureIdentityReissuedError(err) {
 		t.Fatalf("heartbeat error = %v, want fixture identity reissued", err)
@@ -356,9 +356,9 @@ func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
 	if err := persistRegistrationTokenFingerprint(authPath, "old-registration-token"); err != nil {
 		t.Fatalf("persist old registration token fingerprint: %v", err)
 	}
-	t.Setenv("ENVPILOT_RUNNER_AUTH_TOKEN_FILE", authPath)
-	t.Setenv("ENVPILOT_RUNNER_REGISTRATION_TOKEN", "rotated-registration-token")
-	t.Setenv("ENVPILOT_RUNNER_AUTH_TOKEN", "")
+	t.Setenv("ENVPLANE_RUNNER_AUTH_TOKEN_FILE", authPath)
+	t.Setenv("ENVPLANE_RUNNER_REGISTRATION_TOKEN", "rotated-registration-token")
+	t.Setenv("ENVPLANE_RUNNER_AUTH_TOKEN", "")
 
 	cfg := runnerConfigFromEnv()
 	if cfg.RunnerAuthToken != "" {
@@ -370,13 +370,13 @@ func TestRunnerRegistrationTokenRotationOverridesPersistedAuth(t *testing.T) {
 }
 
 func TestRunnerConfigCanonicalAliasesAndLegacyFallback(t *testing.T) {
-	for _, name := range []string{"ENVPILOT_PROJECT_ID", "ENVPLANE_PROJECT_ID", "ENVPILOT_CLUSTER_ID", "ENVPLANE_CLUSTER_ID", "ENVPILOT_RUNNER_ID", "ENVPLANE_RUNNER_ID"} {
+	for _, name := range []string{"ENVPLANE_PROJECT_ID", "ENVPLANE_PROJECT_ID", "ENVPLANE_CLUSTER_ID", "ENVPLANE_CLUSTER_ID", "ENVPLANE_RUNNER_ID", "ENVPLANE_RUNNER_ID"} {
 		t.Setenv(name, "")
 		_ = os.Unsetenv(name)
 	}
-	t.Setenv("ENVPILOT_PROJECT_ID", "legacy-project")
-	t.Setenv("ENVPILOT_CLUSTER_ID", "legacy-cluster")
-	t.Setenv("ENVPILOT_RUNNER_ID", "legacy-runner")
+	t.Setenv("ENVPLANE_PROJECT_ID", "legacy-project")
+	t.Setenv("ENVPLANE_CLUSTER_ID", "legacy-cluster")
+	t.Setenv("ENVPLANE_RUNNER_ID", "legacy-runner")
 	legacy := runnerConfigFromEnv()
 	if legacy.ProjectID != "legacy-project" || len(legacy.EnvDiagnostics) == 0 {
 		t.Fatalf("legacy runner configuration not loaded safely: %#v", legacy)
@@ -424,7 +424,7 @@ func TestPollRunnerCommandsOnceDegradesAndStopsForMissingEndpoint(t *testing.T) 
 		}
 	})}
 
-	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envplane"}
 	state := newRunnerRuntimeState()
 	health := &runnerHealth{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -452,7 +452,7 @@ func TestPollRunnerCommandsOnceStopsForMissingBootstrapSession(t *testing.T) {
 		}, nil
 	})}
 
-	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envplane"}
 	state := newRunnerRuntimeState()
 	health := &runnerHealth{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -479,7 +479,7 @@ func TestPollRunnerCommandsOnceStopsForExpiredBootstrapCredential(t *testing.T) 
 			Request:    request,
 		}, nil
 	})}
-	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "expired-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner", RunnerAuthToken: "expired-auth", DeploymentMode: "helm", RunnerNamespace: "envplane"}
 	state := newRunnerRuntimeState()
 	health := &runnerHealth{}
 	if keepPolling := pollRunnerCommandsOnce(context.Background(), cfg, client, state, health, slog.New(slog.NewTextHandler(io.Discard, nil))); keepPolling {
@@ -522,7 +522,7 @@ func TestPollRunnerCommandsOnceReportsTheClaimedAttemptID(t *testing.T) {
 			return nil, nil
 		}
 	})}
-	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envpilot"}
+	cfg := runnerConfig{ControlPlaneURL: "http://runner.test", ProjectID: "checkout", ClusterID: "target", RunnerID: "checkout-runner", RunnerAuthToken: "runner-auth", DeploymentMode: "helm", RunnerNamespace: "envplane"}
 	state := newRunnerRuntimeState()
 	health := &runnerHealth{}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -573,14 +573,14 @@ func TestValidateRunnerHelmChartUsesTargetRunnerHelmForPrivateOCIChart(t *testin
 
 func TestValidateRunnerHelmChartPassesPinnedVersion(t *testing.T) {
 	var got []string
-	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://ghcr.io/EnvPlane/envpilot-e2e-workload", "0.1.0-main.38", func(_ context.Context, args ...string) ([]byte, error) {
+	err := validateRunnerHelmChartWithCommand(context.Background(), "oci://ghcr.io/envplane/envplane-e2e-workload", "0.1.0-main.38", func(_ context.Context, args ...string) ([]byte, error) {
 		got = args
-		return []byte("apiVersion: v2\nname: envpilot-e2e-workload\n"), nil
+		return []byte("apiVersion: v2\nname: envplane-e2e-workload\n"), nil
 	})
 	if err != nil {
 		t.Fatalf("validate chart: %v", err)
 	}
-	if strings.Join(got, " ") != "show chart oci://ghcr.io/EnvPlane/envpilot-e2e-workload --version 0.1.0-main.38" {
+	if strings.Join(got, " ") != "show chart oci://ghcr.io/envplane/envplane-e2e-workload --version 0.1.0-main.38" {
 		t.Fatalf("helm arguments = %q", got)
 	}
 }
@@ -620,7 +620,7 @@ func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 	result := executeRunnerCommandWithBackend(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "status-target-cluster", Operation: "status",
-		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envpilot-pr-42"},
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-42"},
 	}), fakeRunnerCommandBackend{status: domain.StatusReady})
 	if result.Status != "succeeded" || result.EnvironmentStatus != string(domain.StatusReady) {
 		t.Fatalf("status result = %#v", result)
@@ -629,15 +629,15 @@ func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 
 func TestRunnerRejectsHelmCommandOutsideChartManagedNamespaceRBAC(t *testing.T) {
 	cfg := runnerConfig{
-		RunnerNamespace:            "envpilot-system",
+		RunnerNamespace:            "envplane-system",
 		FeatureEnvWriterMode:       "generatedFeatureNamespaces",
-		FeatureEnvWriterNamespaces: []string{"envpilot-e2e-feature"},
+		FeatureEnvWriterNamespaces: []string{"envplane-e2e-feature"},
 	}
 	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "forbidden-target", Operation: "create",
-		Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envpilot-pr-201"},
+		Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envplane-pr-201"},
 	}), fakeRunnerCommandBackend{}, cfg.canRunHelmInNamespace)
-	if result.ErrorCode != "runner_namespace_access_denied" || !strings.Contains(result.Error, "envpilot-pr-201") {
+	if result.ErrorCode != "runner_namespace_access_denied" || !strings.Contains(result.Error, "envplane-pr-201") {
 		t.Fatalf("forbidden target result = %#v", result)
 	}
 }
@@ -645,13 +645,13 @@ func TestRunnerRejectsHelmCommandOutsideChartManagedNamespaceRBAC(t *testing.T) 
 func TestRunnerAllowsHelmLifecycleOnlyInConfiguredTargetNamespace(t *testing.T) {
 	cfg := runnerConfig{
 		FeatureEnvWriterMode:       "preconfiguredNamespaces",
-		FeatureEnvWriterNamespaces: []string{"envpilot-pr-201"},
+		FeatureEnvWriterNamespaces: []string{"envplane-pr-201"},
 	}
 	for _, operation := range []string{"create", "recreate", "status", "delete", "force_cleanup"} {
 		t.Run(operation, func(t *testing.T) {
 			result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
 				ID: "allowed-" + operation, Operation: operation,
-				Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envpilot-pr-201"},
+				Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envplane-pr-201"},
 			}), fakeRunnerCommandBackend{status: domain.StatusReady}, cfg.canRunHelmInNamespace)
 			if result.Status != "succeeded" || result.ErrorCode != "" {
 				t.Fatalf("%s result = %#v", operation, result)

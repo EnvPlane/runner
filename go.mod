@@ -1,10 +1,10 @@
-module github.com/envpilot/runner
+module github.com/envplane/runner
 
 go 1.25.13
 
 require (
-	github.com/envpilot/contracts v0.1.35
-	github.com/envpilot/gitops v0.1.0
+	github.com/envplane/contracts v0.1.36
+	github.com/envplane/gitops v0.1.1
 	github.com/jackc/pgx/v5 v5.9.2
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -18,5 +18,3 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
-
-replace github.com/envpilot/gitops => ../gitops

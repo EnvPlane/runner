@@ -1,6 +1,6 @@
 package gitops
 
-import "github.com/envpilot/gitops/render"
+import "github.com/envplane/gitops/render"
 
 // Renderer types are aliases to the canonical gitops module. Keep this
 // compatibility package while callers migrate away from internal imports.

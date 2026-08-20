@@ -4,7 +4,7 @@ import (
 	"log/slog"
 	"os"
 
-	runnerruntime "github.com/envpilot/runner/internal/runner"
+	runnerruntime "github.com/envplane/runner/internal/runner"
 )
 
 func main() {

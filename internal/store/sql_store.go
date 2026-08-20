@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 type SQLStore struct {

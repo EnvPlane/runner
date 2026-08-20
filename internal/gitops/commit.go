@@ -66,7 +66,7 @@ func NewCommitService(dir string, push bool, remote string, branch string, autho
 
 func (s *CommitService) Commit(ctx context.Context, message string) (CommitResult, error) {
 	if message == "" {
-		message = "envpilot: update gitops manifests"
+		message = "envplane: update gitops manifests"
 	}
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
@@ -146,7 +146,7 @@ func installGitAskPass(cmd *exec.Cmd, secret string) func() {
 	if strings.TrimSpace(secret) == "" {
 		return func() {}
 	}
-	dir, err := os.MkdirTemp("", "envpilot-git-askpass-")
+	dir, err := os.MkdirTemp("", "envplane-git-askpass-")
 	if err != nil {
 		return func() {}
 	}

@@ -16,7 +16,7 @@ deprecated_brand="$(printf '%s%s' 'Env' 'Pilot')"
 search_deprecated_brand() {
   if command -v rg >/dev/null 2>&1; then
     rg -n --hidden \
-      -g '!.git/**' \
+      -g '!**/.git/**' \
       -g '!node_modules/**' \
       -g '!**/.next/**' \
       -g '!vendor/**' \
@@ -49,7 +49,7 @@ search_status=$?
 set -e
 
 if [[ "$search_status" -eq 0 ]]; then
-  echo "Use the canonical EnvPlane product name in human-readable text. Legacy machine identifiers such as ENVPILOT_* and envpilot.io/* remain supported." >&2
+  echo "Use the EnvPlane product name and the ENVPLANE_*/envplane.io/* identifiers consistently." >&2
   exit 1
 fi
 

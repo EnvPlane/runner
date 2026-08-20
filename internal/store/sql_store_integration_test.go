@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -396,7 +396,7 @@ func TestSQLBootstrapSessionStoreClaimBootstrapTokenRollsBackOnUpdateError(t *te
 	}
 
 	if _, err := db.Exec(`
-CREATE OR REPLACE FUNCTION envpilot_test_fail_bootstrap_claim()
+CREATE OR REPLACE FUNCTION envplane_test_fail_bootstrap_claim()
 RETURNS trigger
 LANGUAGE plpgsql
 AS $$
@@ -409,18 +409,18 @@ END;
 $$`); err != nil {
 		t.Fatalf("create rollback test function: %v", err)
 	}
-	defer db.Exec(`DROP FUNCTION IF EXISTS envpilot_test_fail_bootstrap_claim()`)
-	if _, err := db.Exec(`DROP TRIGGER IF EXISTS envpilot_test_fail_bootstrap_claim ON bootstrap_sessions`); err != nil {
+	defer db.Exec(`DROP FUNCTION IF EXISTS envplane_test_fail_bootstrap_claim()`)
+	if _, err := db.Exec(`DROP TRIGGER IF EXISTS envplane_test_fail_bootstrap_claim ON bootstrap_sessions`); err != nil {
 		t.Fatalf("drop stale rollback test trigger: %v", err)
 	}
 	if _, err := db.Exec(`
-CREATE TRIGGER envpilot_test_fail_bootstrap_claim
+CREATE TRIGGER envplane_test_fail_bootstrap_claim
 BEFORE UPDATE ON bootstrap_sessions
 FOR EACH ROW
-EXECUTE FUNCTION envpilot_test_fail_bootstrap_claim()`); err != nil {
+EXECUTE FUNCTION envplane_test_fail_bootstrap_claim()`); err != nil {
 		t.Fatalf("create rollback test trigger: %v", err)
 	}
-	defer db.Exec(`DROP TRIGGER IF EXISTS envpilot_test_fail_bootstrap_claim ON bootstrap_sessions`)
+	defer db.Exec(`DROP TRIGGER IF EXISTS envplane_test_fail_bootstrap_claim ON bootstrap_sessions`)
 
 	_, err = store.ClaimBootstrapToken(BootstrapTokenClaimRequest{
 		ProjectID:       "sql-bootstrap-rollback",
@@ -462,16 +462,16 @@ func sqlTestTokenHash(token string) string {
 
 func setupSQLStoreIntegrationDB(t *testing.T) (*sql.DB, func()) {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("ENVPILOT_TEST_DATABASE_URL"))
+	dsn := strings.TrimSpace(os.Getenv("ENVPLANE_TEST_DATABASE_URL"))
 	if dsn == "" {
-		t.Skip("ENVPILOT_TEST_DATABASE_URL is not set; skipping SQL store integration test")
+		t.Skip("ENVPLANE_TEST_DATABASE_URL is not set; skipping SQL store integration test")
 	}
-	if os.Getenv("ENVPILOT_TEST_DATABASE_SCHEMA_READY") != "1" {
-		t.Skip("database schema must be provisioned by control-plane; set ENVPILOT_TEST_DATABASE_SCHEMA_READY=1")
+	if os.Getenv("ENVPLANE_TEST_DATABASE_SCHEMA_READY") != "1" {
+		t.Skip("database schema must be provisioned by control-plane; set ENVPLANE_TEST_DATABASE_SCHEMA_READY=1")
 	}
-	migrationsDir := strings.TrimSpace(os.Getenv("ENVPILOT_MIGRATIONS_DIR"))
+	migrationsDir := strings.TrimSpace(os.Getenv("ENVPLANE_MIGRATIONS_DIR"))
 	if migrationsDir == "" {
-		t.Fatal("ENVPILOT_MIGRATIONS_DIR must point to the control-plane migration artifact")
+		t.Fatal("ENVPLANE_MIGRATIONS_DIR must point to the control-plane migration artifact")
 	}
 	if _, err := os.Stat(strings.TrimSuffix(migrationsDir, "/") + "/migrations.json"); err != nil {
 		t.Fatalf("control-plane migration artifact is unavailable: %v", err)

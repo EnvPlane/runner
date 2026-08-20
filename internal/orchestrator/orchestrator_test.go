@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
-	"github.com/envpilot/runner/internal/gitops"
-	"github.com/envpilot/runner/internal/store"
+	"github.com/envplane/contracts/domain"
+	"github.com/envplane/runner/internal/gitops"
+	"github.com/envplane/runner/internal/store"
 )
 
 func TestCreateTriggersRendererAndPersistsCreatingStatus(t *testing.T) {
@@ -342,7 +342,7 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 		ID:        "pr-100",
 		Project:   "proj-100",
 		Product:   "payments",
-		Namespace: "envpilot-pr-100",
+		Namespace: "envplane-pr-100",
 		GitOps:    domain.GitOpsTarget{},
 		Source: domain.SCMSource{
 			PullRequestID: "77",
@@ -404,16 +404,16 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 	if decoded.Spec.Release.Name != "proj-100-pr-100" {
 		t.Fatalf("release name = %q", decoded.Spec.Release.Name)
 	}
-	if decoded.Spec.Release.Namespace != "envpilot-pr-100" {
+	if decoded.Spec.Release.Namespace != "envplane-pr-100" {
 		t.Fatalf("release namespace = %q", decoded.Spec.Release.Namespace)
 	}
-	if !hasLabel(decoded.Metadata.Labels, "envpilot.io/project-id", "proj-100") {
+	if !hasLabel(decoded.Metadata.Labels, "envplane.io/project-id", "proj-100") {
 		t.Fatalf("missing top metadata label")
 	}
-	if !hasLabel(decoded.Spec.Namespace.Labels, "envpilot.io/managed", "true") {
+	if !hasLabel(decoded.Spec.Namespace.Labels, "envplane.io/managed", "true") {
 		t.Fatalf("missing namespace label")
 	}
-	if !hasLabel(decoded.Spec.Release.Labels, "envpilot.io/environment-id", "pr-100") {
+	if !hasLabel(decoded.Spec.Release.Labels, "envplane.io/environment-id", "pr-100") {
 		t.Fatalf("missing release label")
 	}
 
@@ -444,7 +444,7 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
 	backend := NewHelmDirectBackend(nil)
 	environment := domain.Environment{
-		ID: "envpilot-e2e-full-01", Project: "bethunder-e2e-20260729", Namespace: "envpilot-e2e-full-01",
+		ID: "envplane-e2e-full-01", Project: "bethunder-e2e-20260729", Namespace: "envplane-e2e-full-01",
 	}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
 		"deployment": map[string]any{
@@ -457,10 +457,10 @@ func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deployment target: %v", err)
 	}
-	if release != "bethunder-e2e-20260729-envpilot-e2e-full-01" {
+	if release != "bethunder-e2e-20260729-envplane-e2e-full-01" {
 		t.Fatalf("release = %q", release)
 	}
-	if namespace != "envpilot-e2e-full-01" {
+	if namespace != "envplane-e2e-full-01" {
 		t.Fatalf("namespace = %q", namespace)
 	}
 }
@@ -468,12 +468,12 @@ func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
 func TestHelmDirectBackendSharedNamespaceUsesCompiledNamespacePattern(t *testing.T) {
 	backend := NewHelmDirectBackend(nil)
 	environment := domain.Environment{
-		ID: "fixture-pr-201", Project: "envpilot-e2e-fixture", Namespace: "envpilot-pr-201",
+		ID: "fixture-pr-201", Project: "envplane-e2e-fixture", Namespace: "envplane-pr-201",
 		Source: domain.SCMSource{PullRequestID: "201"},
 	}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
 		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
-			"namespaceMode": "shared", "namespacePattern": "envpilot-e2e-feature",
+			"namespaceMode": "shared", "namespacePattern": "envplane-e2e-feature",
 			"releaseNamePattern": "{{ .project.id }}-{{ .environment.name }}",
 		}},
 	}}
@@ -481,7 +481,7 @@ func TestHelmDirectBackendSharedNamespaceUsesCompiledNamespacePattern(t *testing
 	if err != nil {
 		t.Fatalf("deployment target: %v", err)
 	}
-	if namespace != "envpilot-e2e-feature" {
+	if namespace != "envplane-e2e-feature" {
 		t.Fatalf("shared namespace target = %q", namespace)
 	}
 }
@@ -574,7 +574,7 @@ func TestHelmDirectBackendRenderCustomEnvironmentMetadataAndValues(t *testing.T)
 	if identity["prNumber"] != "1234" || identity["branch"] != "feature/custom" || identity["commitSHA"] != "deadbeef" {
 		t.Fatalf("identity map = %#v", identity)
 	}
-	if !hasLabel(decoded.Spec.Release.Labels, "envpilot.io/managed", "true") {
+	if !hasLabel(decoded.Spec.Release.Labels, "envplane.io/managed", "true") {
 		t.Fatalf("missing managed label")
 	}
 }
@@ -586,7 +586,7 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 		ID:        "pr-100",
 		Project:   "proj-100",
 		Product:   "payments",
-		Namespace: "envpilot-pr-100",
+		Namespace: "envplane-pr-100",
 		Charts: domain.ChartVersions{
 			App: "payments-chart",
 		},
@@ -627,7 +627,7 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 	if call.Options.ChartRef != "payments-chart" {
 		t.Fatalf("chart = %q", call.Options.ChartRef)
 	}
-	if call.Options.Namespace != "envpilot-pr-100" {
+	if call.Options.Namespace != "envplane-pr-100" {
 		t.Fatalf("namespace = %q", call.Options.Namespace)
 	}
 	if call.Options.Wait != true {
@@ -647,7 +647,7 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 func TestHelmDirectBackendApplyUsesCompiledChartVersion(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)
-	environment := domain.Environment{ID: "pr-versioned", Project: "orders", Namespace: "envpilot-pr-versioned", Charts: domain.ChartVersions{App: "fallback-chart"}}
+	environment := domain.Environment{ID: "pr-versioned", Project: "orders", Namespace: "envplane-pr-versioned", Charts: domain.ChartVersions{App: "fallback-chart"}}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
 		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
 			"chartRef": "oci://registry.example.com/charts/orders", "chartVersion": "2.8.1",
@@ -670,7 +670,7 @@ func TestHelmDirectBackendApplyUsesCompiledChartVersion(t *testing.T) {
 func TestHelmDirectBackendApplyOmitsVersionForDirectArchive(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)
-	environment := domain.Environment{ID: "pr-archive", Project: "orders", Namespace: "envpilot-pr-archive"}
+	environment := domain.Environment{ID: "pr-archive", Project: "orders", Namespace: "envplane-pr-archive"}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
 		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
 			"chartRef": "https://charts.example.test/orders-2.8.1.tgz", "chartVersion": "2.8.1",
@@ -688,7 +688,7 @@ func TestHelmDirectBackendApplyHonorsCreateNamespaceFalse(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)
 	environment := domain.Environment{
-		ID: "pr-101", Project: "proj-101", Namespace: "envpilot-pr-101",
+		ID: "pr-101", Project: "proj-101", Namespace: "envplane-pr-101",
 		Charts: domain.ChartVersions{App: "payments-chart"},
 	}
 	projectConfig := domain.ProjectConfig{Config: map[string]any{
@@ -749,7 +749,7 @@ func TestHelmDirectBackendApplyGeneratesValuesFile(t *testing.T) {
 		ID:        "pr-101",
 		Project:   "proj-101",
 		Product:   "payments",
-		Namespace: "envpilot-pr-101",
+		Namespace: "envplane-pr-101",
 		GitOps:    domain.GitOpsTarget{},
 		Services: []domain.ServiceOverride{
 			{Name: "api", Tag: "v1"},
@@ -849,7 +849,7 @@ func TestHelmDirectBackendDeleteUninstallsRelease(t *testing.T) {
 	environment := domain.Environment{
 		ID:        "pr-104",
 		Project:   "proj-104",
-		Namespace: "envpilot-pr-104",
+		Namespace: "envplane-pr-104",
 	}
 	projectConfig := domain.ProjectConfig{
 		Config: map[string]any{
@@ -871,7 +871,7 @@ func TestHelmDirectBackendDeleteUninstallsRelease(t *testing.T) {
 	if call.Options.ReleaseName != "proj-104-pr-104" {
 		t.Fatalf("release name = %q", call.Options.ReleaseName)
 	}
-	if call.Options.Namespace != "envpilot-pr-104" {
+	if call.Options.Namespace != "envplane-pr-104" {
 		t.Fatalf("namespace = %q", call.Options.Namespace)
 	}
 	if executor.deleteNamespaceCalls != 1 {
@@ -939,7 +939,7 @@ func TestHelmDirectBackendDeleteSkipsUnmanagedNamespace(t *testing.T) {
 	environment := domain.Environment{
 		ID:        "pr-106",
 		Project:   "proj-106",
-		Namespace: "envpilot-pr-106",
+		Namespace: "envplane-pr-106",
 	}
 	projectConfig := domain.ProjectConfig{
 		Config: map[string]any{
@@ -1084,7 +1084,7 @@ func TestHelmDirectBackendStatusMapsHelmStates(t *testing.T) {
 	environment := domain.Environment{
 		ID:        "pr-108",
 		Project:   "proj-108",
-		Namespace: "envpilot-pr-108",
+		Namespace: "envplane-pr-108",
 		Status:    domain.StatusCreating,
 	}
 	projectConfig := domain.ProjectConfig{
@@ -1251,7 +1251,7 @@ func TestFluxBackendApplyWithWriterCommitsAndReturnsPRURL(t *testing.T) {
 	if writer.commits != 1 {
 		t.Fatalf("writer commits = %d", writer.commits)
 	}
-	if writer.lastCommitMessage != "envpilot: create kan-flux-apply" {
+	if writer.lastCommitMessage != "envplane: create kan-flux-apply" {
 		t.Fatalf("commit message = %q", writer.lastCommitMessage)
 	}
 }
@@ -1274,7 +1274,7 @@ func TestFluxBackendDeleteWithWriterRemovesPathAndCommits(t *testing.T) {
 	if writer.lastRemovedPath != environment.GitOpsDirectory() {
 		t.Fatalf("remove path = %q", writer.lastRemovedPath)
 	}
-	if writer.lastCommitMessage != "envpilot: delete kan-flux-delete" {
+	if writer.lastCommitMessage != "envplane: delete kan-flux-delete" {
 		t.Fatalf("commit message = %q", writer.lastCommitMessage)
 	}
 }
@@ -1616,7 +1616,7 @@ func (b *writerAwareBackend) ApplyWithWriter(ctx context.Context, environment do
 	if b.err != nil {
 		return gitops.CommitResult{}, b.err
 	}
-	return writer.Commit(ctx, "envpilot: create "+environment.ID)
+	return writer.Commit(ctx, "envplane: create "+environment.ID)
 }
 
 func (b *writerAwareBackend) Delete(context.Context, domain.Environment, domain.ProjectConfig) error {
@@ -1632,7 +1632,7 @@ func (b *writerAwareBackend) DeleteWithWriter(_ context.Context, _ domain.Enviro
 	if b.err != nil {
 		return gitops.CommitResult{}, b.err
 	}
-	if _, err := writer.Commit(context.TODO(), "envpilot: delete"); err != nil {
+	if _, err := writer.Commit(context.TODO(), "envplane: delete"); err != nil {
 		return gitops.CommitResult{}, err
 	}
 	return gitops.CommitResult{Committed: true}, nil
@@ -1784,7 +1784,7 @@ func TestRenderCompiledManifestTemplatesUsesEnvironmentInputs(t *testing.T) {
 	environment := domain.Environment{
 		ID:        "cms-feature-login",
 		Project:   "cms",
-		Namespace: "envpilot-pr-42",
+		Namespace: "envplane-pr-42",
 		Source: domain.SCMSource{
 			PullRequestID: "42",
 			Branch:        "feature/login",

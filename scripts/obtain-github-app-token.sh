@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-: "${ENVPILOT_AUTOMATION_APP_CLIENT_ID:?missing ENVPILOT_AUTOMATION_APP_CLIENT_ID}"
-: "${ENVPILOT_AUTOMATION_APP_PRIVATE_KEY:?missing ENVPILOT_AUTOMATION_APP_PRIVATE_KEY}"
+: "${ENVPLANE_AUTOMATION_APP_CLIENT_ID:?missing ENVPLANE_AUTOMATION_APP_CLIENT_ID}"
+: "${ENVPLANE_AUTOMATION_APP_PRIVATE_KEY:?missing ENVPLANE_AUTOMATION_APP_PRIVATE_KEY}"
 
 GH_APP_OWNER="${GH_APP_OWNER:-EnvPlane}"
 GH_APP_REPOSITORY="${GH_APP_REPOSITORY:-deploy}"
@@ -141,7 +141,7 @@ jwt_b64_url() {
   openssl base64 -e -A | tr '/+' '_-' | tr -d '='
 }
 
-normalized_key=$(printf '%s' "${ENVPILOT_AUTOMATION_APP_PRIVATE_KEY}" | sed 's/\\n/\n/g')
+normalized_key=$(printf '%s' "${ENVPLANE_AUTOMATION_APP_PRIVATE_KEY}" | sed 's/\\n/\n/g')
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 key_path="$tmp_dir/private-key.pem"
@@ -152,7 +152,7 @@ iat=$((now - 60))
 exp=$((now + 600))
 
 header='{"alg":"RS256","typ":"JWT"}'
-payload=$(jq -n --argjson iat "$iat" --argjson exp "$exp" --arg iss "$ENVPILOT_AUTOMATION_APP_CLIENT_ID" '{iat: ($iat|tonumber), exp: ($exp|tonumber), iss: $iss}')
+payload=$(jq -n --argjson iat "$iat" --argjson exp "$exp" --arg iss "$ENVPLANE_AUTOMATION_APP_CLIENT_ID" '{iat: ($iat|tonumber), exp: ($exp|tonumber), iss: $iss}')
 
 unsigned="$(printf '%s' "$header" | jwt_b64_url).$(printf '%s' "$payload" | jwt_b64_url)"
 signature=$(printf '%s' "$unsigned" | openssl dgst -sha256 -sign "$key_path" | openssl base64 -A | tr '/+' '_-' | tr -d '=')

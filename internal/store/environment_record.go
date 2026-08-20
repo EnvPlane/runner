@@ -3,7 +3,7 @@ package store
 import (
 	"time"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 // EnvironmentRecord is the runner persistence projection and is intentionally local.

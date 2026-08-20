@@ -13,38 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - id: source_read_auth
-        name: Select source authentication
-        env:
-          CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          FALLBACK_PAT: ${{ secrets.ENVPILOT_AUTOMATION_PAT }}
-        run: |
-          if [[ -n "$CLIENT_ID" && -n "$APP_PRIVATE_KEY" ]]; then echo "method=app" >> "$GITHUB_OUTPUT"; elif [[ -n "$FALLBACK_PAT" ]]; then echo "method=pat" >> "$GITHUB_OUTPUT"; else echo "No source-read credentials configured." >&2; exit 1; fi
-      - id: source_read_app
-        if: steps.source_read_auth.outputs.method == 'app'
-        env:
-          ENVPILOT_AUTOMATION_APP_CLIENT_ID: ${{ secrets.ENVPILOT_AUTOMATION_APP_CLIENT_ID }}
-          ENVPILOT_AUTOMATION_APP_PRIVATE_KEY: ${{ secrets.ENVPILOT_AUTOMATION_APP_PRIVATE_KEY }}
-          GH_APP_OWNER: ${{ github.repository_owner }}
-          GH_APP_REPOSITORY: deploy
-          GH_APP_TOKEN_PERMISSIONS: '{"contents":"read"}'
-        run: |
-          if [[ -x ./scripts/obtain-github-app-token.sh ]]; then
-            ./scripts/obtain-github-app-token.sh
-          elif [[ -x ./runner/scripts/obtain-github-app-token.sh ]]; then
-            ./runner/scripts/obtain-github-app-token.sh
-          else
-            echo "Script not found: ./scripts/obtain-github-app-token.sh" >&2
-            echo "Checked paths: ./scripts and ./runner/scripts" >&2
-            exit 1
-          fi
-      - name: Configure private Go modules
-        env:
-          SOURCE_TOKEN: ${{ steps.source_read_app.outputs.token || secrets.ENVPILOT_AUTOMATION_PAT }}
-        run: |
-          echo 'GOPRIVATE=github.com/envpilot/*' >> "$GITHUB_ENV"
-          git config --global url."https://x-access-token:${SOURCE_TOKEN}@github.com/".insteadOf "https://github.com/"
+      # EnvPlane runtime modules are public. PR validation must remain
+      # reproducible without release credentials; GitHub App authentication is
+      # reserved for publication workflows that write packages or repositories.
       - name: Enforce schema ownership
         run: |
           test ! -d migrations/postgres
@@ -68,8 +39,8 @@ jobs:
             runner-go-cache-${{ runner.os }}-
       - name: Use published runtime modules
         run: |
-          go mod edit -dropreplace=github.com/envpilot/contracts
-          go mod edit -dropreplace=github.com/envpilot/gitops
+          go mod edit -dropreplace=github.com/envplane/contracts
+          go mod edit -dropreplace=github.com/envplane/gitops
           go mod tidy
       - name: Scan Go dependencies
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 ./...

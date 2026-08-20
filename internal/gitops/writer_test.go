@@ -122,8 +122,8 @@ func TestRepositoryWriterClonesWritesSubdirAndPushes(t *testing.T) {
 		Workspace:   workspace,
 		Commit:      true,
 		Push:        true,
-		AuthorName:  "envpilot",
-		AuthorEmail: "envpilot@example.com",
+		AuthorName:  "envplane",
+		AuthorEmail: "envplane@example.com",
 	})
 	if err != nil {
 		t.Fatalf("repository writer: %v", err)
@@ -131,7 +131,7 @@ func TestRepositoryWriterClonesWritesSubdirAndPushes(t *testing.T) {
 	if _, err := writer.WriteManifest(context.Background(), "feature-envs/checkout/pr-123/namespace.yaml", []byte("kind: Namespace\n"), "create"); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	if result, err := writer.Commit(context.Background(), "envpilot: create pr-123"); err != nil {
+	if result, err := writer.Commit(context.Background(), "envplane: create pr-123"); err != nil {
 		t.Fatalf("commit: %v", err)
 	} else if !result.Committed || !result.Pushed {
 		t.Fatalf("expected committed and pushed result, got %+v", result)
@@ -167,12 +167,12 @@ func TestRepositoryWriterBranchStrategyPushesEnvironmentBranch(t *testing.T) {
 		URL:            remote,
 		Branch:         "main",
 		BranchStrategy: "branch",
-		PushBranch:     "envpilot/pr-123",
+		PushBranch:     "envplane/pr-123",
 		Workspace:      filepath.Join(t.TempDir(), "worktree"),
 		Commit:         true,
 		Push:           true,
-		AuthorName:     "envpilot",
-		AuthorEmail:    "envpilot@example.com",
+		AuthorName:     "envplane",
+		AuthorEmail:    "envplane@example.com",
 	})
 	if err != nil {
 		t.Fatalf("repository writer: %v", err)
@@ -180,16 +180,16 @@ func TestRepositoryWriterBranchStrategyPushesEnvironmentBranch(t *testing.T) {
 	if _, err := writer.WriteManifest(context.Background(), "feature-envs/checkout/pr-123/namespace.yaml", []byte("kind: Namespace\n"), "create"); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	result, err := writer.Commit(context.Background(), "envpilot: create pr-123")
+	result, err := writer.Commit(context.Background(), "envplane: create pr-123")
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
-	if result.Branch != "envpilot/pr-123" || !result.Pushed {
+	if result.Branch != "envplane/pr-123" || !result.Pushed {
 		t.Fatalf("unexpected commit result: %+v", result)
 	}
 
 	verify := filepath.Join(t.TempDir(), "verify")
-	run(t, "", "git", "clone", "--branch", "envpilot/pr-123", remote, verify)
+	run(t, "", "git", "clone", "--branch", "envplane/pr-123", remote, verify)
 	if _, err := os.Stat(filepath.Join(verify, "feature-envs/checkout/pr-123/namespace.yaml")); err != nil {
 		t.Fatalf("expected manifest on env branch: %v", err)
 	}
@@ -234,9 +234,9 @@ func TestRepositoryWriterPullRequestStrategyCreatesProposal(t *testing.T) {
 		Commit:           true,
 		Push:             true,
 		PushRemote:       "origin",
-		PushBranch:       "envpilot/pr-123",
-		AuthorName:       "envpilot",
-		AuthorEmail:      "envpilot@example.com",
+		PushBranch:       "envplane/pr-123",
+		AuthorName:       "envplane",
+		AuthorEmail:      "envplane@example.com",
 		PullRequestAPI:   server.URL,
 		PullRequestTitle: "EnvPlane pr-123",
 		PullRequestBody:  "Generated for pr-123",
@@ -247,7 +247,7 @@ func TestRepositoryWriterPullRequestStrategyCreatesProposal(t *testing.T) {
 	if _, err := writer.WriteManifest(context.Background(), "feature-envs/checkout/pr-123/namespace.yaml", []byte("kind: Namespace\n"), "create"); err != nil {
 		t.Fatalf("write manifest: %v", err)
 	}
-	result, err := writer.Commit(context.Background(), "envpilot: create pr-123")
+	result, err := writer.Commit(context.Background(), "envplane: create pr-123")
 	if err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestRepositoryWriterPullRequestStrategyCreatesProposal(t *testing.T) {
 	if gotAuth != "Bearer test-token" {
 		t.Fatalf("pull request auth = %q", gotAuth)
 	}
-	if gotPayload["head"] != "envpilot/pr-123" || gotPayload["base"] != "main" {
+	if gotPayload["head"] != "envplane/pr-123" || gotPayload["base"] != "main" {
 		t.Fatalf("pull request payload = %#v", gotPayload)
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/envpilot/contracts/domain"
+	"github.com/envplane/contracts/domain"
 )
 
 type JSONBootstrapSessionStore struct {
