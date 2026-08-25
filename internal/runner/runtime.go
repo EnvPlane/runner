@@ -866,10 +866,14 @@ func isRunnerFixtureIdentityReissuedError(err error) bool {
 func isRunnerAuthTokenNotIssuedError(err error) bool {
 	var apiError runnerAPIError
 	if errors.As(err, &apiError) {
-		return apiError.status == http.StatusUnauthorized && strings.Contains(strings.ToLower(apiError.detail), "token is not issued")
+		if apiError.status != http.StatusUnauthorized {
+			return false
+		}
+		detail := strings.ToLower(apiError.detail)
+		return strings.Contains(detail, "token is not issued") || strings.Contains(detail, "invalid runner auth token")
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "401") && strings.Contains(message, "token is not issued")
+	return strings.Contains(message, "401") && (strings.Contains(message, "token is not issued") || strings.Contains(message, "invalid runner auth token"))
 }
 
 func isRunnerCommandTransportError(err error) bool {

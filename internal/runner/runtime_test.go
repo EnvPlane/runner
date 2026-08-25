@@ -126,6 +126,23 @@ func TestNextRunnerCommandClassifiesUnissuedRuntimeTokenForRecovery(t *testing.T
 	}
 }
 
+func TestRunnerPostJSONClassifiesInvalidRuntimeTokenForRecovery(t *testing.T) {
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusUnauthorized,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(`{"error":"invalid runner auth token"}`)),
+			Request:    request,
+		}, nil
+	})}
+	err := reportRunnerHeartbeat(context.Background(), runnerConfig{
+		ControlPlaneURL: "http://runner.test", ProjectID: "demo-cms", ClusterID: "local", RunnerID: "demo-cms-runner", RunnerAuthToken: "stale-token",
+	}, client, string(domain.RunnerHeartbeatStatusOnline), "")
+	if err == nil || !isRunnerAuthTokenNotIssuedError(err) {
+		t.Fatalf("heartbeat error = %v, want runtime-token recovery error", err)
+	}
+}
+
 func TestRunnerConfigRejectsHostLocalRemoteControlPlaneEndpoint(t *testing.T) {
 	cfg := runnerConfig{
 		ControlPlaneURL:          "https://host.minikube.internal:18080",
