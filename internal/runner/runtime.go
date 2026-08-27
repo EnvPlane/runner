@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,6 +29,7 @@ import (
 	"github.com/envplane/contracts/domain"
 	"github.com/envplane/contracts/sdk/go/envplanesdk"
 	"github.com/envplane/runner/internal/orchestrator"
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -990,6 +992,32 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 		}
 		result.Status = "succeeded"
 		return result
+	case "render_release_plan":
+		result.ReleasePlanTransportVersion = domain.ReleasePlanTransportVersion
+		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
+		if err != nil {
+			result.Error = err.Error()
+			return result
+		}
+		if namespaceAllowed != nil && !namespaceAllowed(result.Namespace) {
+			result.ErrorCode = "runner_namespace_access_denied"
+			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
+			return result
+		}
+		manifests, renderErr := backend.Render(ctx, command.Environment, projectConfig)
+		if renderErr != nil {
+			result.ErrorCode = "release_plan_render_failed"
+			result.Error = renderErr.Error()
+			return result
+		}
+		result.RenderedResources, err = releasePlanResources(manifests, result.Namespace, result.ReleaseName)
+		if err != nil {
+			result.ErrorCode = "release_plan_render_invalid"
+			result.Error = err.Error()
+			return result
+		}
+		result.Status = "succeeded"
+		return result
 	case "create", "recreate":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
@@ -1069,7 +1097,79 @@ func validateReleasePlanCommand(command domain.RunnerCommand) error {
 	if command.ChartRef != "" || command.ChartVersion != "" {
 		return fmt.Errorf("chart references are not a runtime source; use the signed release plan")
 	}
+	if command.ReleasePlanTransportVersion != domain.ReleasePlanTransportVersion || command.ReleasePlan == nil {
+		return fmt.Errorf("versioned EnvironmentReleasePlan payload is required")
+	}
+	publicKey, err := base64.StdEncoding.DecodeString(command.ReleasePlanPublicKey)
+	if err != nil {
+		return fmt.Errorf("release plan public key is invalid")
+	}
+	tenantID := command.Environment.TenantID
+	if tenantID == "" {
+		tenantID = domain.DefaultTenantID
+	}
+	namespaces := make([]string, 0, len(command.ReleasePlan.RenderedResources))
+	kinds := make([]string, 0, len(command.ReleasePlan.RenderedResources))
+	for _, resource := range command.ReleasePlan.RenderedResources {
+		namespaces = appendUnique(namespaces, resource.Namespace)
+		kinds = appendUnique(kinds, resource.Kind)
+	}
+	ref := domain.ReleasePlanTransportReference{PlanID: command.ReleasePlanID, PlanDigest: command.ReleasePlanDigest, TemplateDigest: command.ReleasePlan.TemplateDigest, InputDigest: command.ReleasePlan.InputDigest, Signature: command.ReleasePlanSignature, KeyID: command.ReleasePlanKeyID}
+	if err := domain.VerifyReleasePlanReference(*command.ReleasePlan, ref, publicKey, domain.ReleasePlanRunnerIdentity{TenantID: tenantID, ProjectID: command.ProjectID, ClusterID: command.ClusterID, RunnerID: command.RunnerID}, namespaces, kinds); err != nil {
+		return fmt.Errorf("release plan verification failed: %w", err)
+	}
 	return nil
+}
+
+func releasePlanResources(manifests []orchestrator.Manifest, namespace, releaseName string) ([]domain.RenderedResource, error) {
+	resources := make([]domain.RenderedResource, 0, len(manifests))
+	for index, item := range manifests {
+		var manifest map[string]any
+		if err := yaml.Unmarshal(item.Content, &manifest); err != nil {
+			return nil, fmt.Errorf("decode rendered manifest %d: %w", index, err)
+		}
+		kind := strings.TrimSpace(fmt.Sprint(manifest["kind"]))
+		metadata, _ := manifest["metadata"].(map[string]any)
+		name := strings.TrimSpace(fmt.Sprint(metadata["name"]))
+		resourceNamespace := strings.TrimSpace(fmt.Sprint(metadata["namespace"]))
+		if kind == "" {
+			kind = strings.TrimSpace(item.Kind)
+			manifest["kind"] = kind
+		}
+		if name == "" {
+			name = releaseName
+		}
+		if resourceNamespace == "" && kind != "Namespace" {
+			resourceNamespace = namespace
+		}
+		if metadata == nil {
+			metadata = map[string]any{}
+			manifest["metadata"] = metadata
+		}
+		metadata["name"] = name
+		if kind != "Namespace" {
+			metadata["namespace"] = resourceNamespace
+		}
+		payload, err := json.Marshal(manifest)
+		if err != nil {
+			return nil, fmt.Errorf("encode rendered manifest %d: %w", index, err)
+		}
+		digest := sha256.Sum256(payload)
+		resources = append(resources, domain.RenderedResource{ResourceID: fmt.Sprintf("%s/%s/%s", kind, resourceNamespace, name), Kind: kind, Namespace: resourceNamespace, Name: name, Manifest: manifest, Digest: fmt.Sprintf("sha256:%x", digest[:])})
+	}
+	if len(resources) == 0 {
+		return nil, fmt.Errorf("release plan render returned no resources")
+	}
+	return resources, nil
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, current := range values {
+		if current == value {
+			return values
+		}
+	}
+	return append(values, value)
 }
 
 func mustJSON(value any) []byte {

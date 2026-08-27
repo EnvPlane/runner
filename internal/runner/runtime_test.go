@@ -3,6 +3,9 @@ package runner
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -26,15 +29,33 @@ type fakeRunnerCommandBackend struct {
 }
 
 func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCommand {
-	command.ReleasePlanID = "release-plan-test"
-	command.ReleasePlanDigest = "sha256:release-plan-test"
-	command.ReleasePlanSignature = "signature-test"
-	command.ReleasePlanKeyID = "key-test"
+	tenantID := command.Environment.TenantID
+	if tenantID == "" {
+		tenantID = domain.DefaultTenantID
+		command.Environment.TenantID = tenantID
+	}
+	if command.ProjectID == "" {
+		command.ProjectID = command.Environment.Project
+	}
+	resource := domain.RenderedResource{ResourceID: "HelmDirect/" + command.Environment.Namespace + "/" + command.Environment.ID, Kind: "HelmDirect", Namespace: command.Environment.Namespace, Name: command.Environment.ID, Manifest: map[string]any{"apiVersion": "envplane.io/v1", "kind": "HelmDirect", "metadata": map[string]any{"name": command.Environment.ID, "namespace": command.Environment.Namespace}}, Digest: "sha256:resource"}
+	plan := domain.EnvironmentReleasePlan{ContractVersion: domain.EnvironmentTemplateContractVersion, PlanID: "release-plan-test", TenantID: tenantID, ProjectID: command.ProjectID, EnvironmentID: command.Environment.ID, TemplateRevisionID: "revision-test", TemplateDigest: "sha256:template", Backend: domain.DeploymentBackendHelmDirect, Ownership: []domain.OwnershipRecord{{Kind: resource.Kind, Namespace: resource.Namespace, Name: resource.Name}}, RenderedResources: []domain.RenderedResource{resource}, InputDigest: "sha256:input"}
+	plan.Digest, _ = plan.CanonicalDigest()
+	publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
+	ref, _ := domain.SignReleasePlanReference(plan, "key-test", privateKey)
+	command.ReleasePlanTransportVersion = domain.ReleasePlanTransportVersion
+	command.ReleasePlanID = ref.PlanID
+	command.ReleasePlanDigest = ref.PlanDigest
+	command.ReleasePlanSignature = ref.Signature
+	command.ReleasePlanKeyID = ref.KeyID
+	command.ReleasePlanPublicKey = base64.StdEncoding.EncodeToString(publicKey)
+	command.ReleasePlan = &plan
+	command.ChartRef = ""
+	command.ChartVersion = ""
 	return command
 }
 
 func (b fakeRunnerCommandBackend) Render(context.Context, domain.Environment, domain.ProjectConfig) ([]orchestrator.Manifest, error) {
-	return nil, nil
+	return []orchestrator.Manifest{{Path: "release.yaml", Kind: "HelmDirect", Content: []byte("apiVersion: envplane.io/v1\nkind: HelmDirect\nmetadata:\n  name: release\n  namespace: feature\n")}}, nil
 }
 func (b fakeRunnerCommandBackend) Apply(context.Context, domain.Environment, domain.ProjectConfig) error {
 	return nil
@@ -655,6 +676,29 @@ func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 	}), fakeRunnerCommandBackend{status: domain.StatusReady})
 	if result.Status != "succeeded" || result.EnvironmentStatus != string(domain.StatusReady) {
 		t.Fatalf("status result = %#v", result)
+	}
+}
+
+func TestRunnerRendersReleasePlanDraftBeforeApply(t *testing.T) {
+	result := executeRunnerCommandWithBackend(context.Background(), domain.RunnerCommand{
+		ID: "render-plan", ProjectID: "checkout", Operation: "render_release_plan",
+		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
+	}, fakeRunnerCommandBackend{})
+	if result.Status != "succeeded" || result.ReleasePlanTransportVersion != domain.ReleasePlanTransportVersion || len(result.RenderedResources) != 1 {
+		t.Fatalf("render result = %#v", result)
+	}
+	resource := result.RenderedResources[0]
+	if resource.Kind != "HelmDirect" || resource.Namespace != "feature" || resource.Name != "release" || resource.Digest == "" {
+		t.Fatalf("rendered release-plan resource = %#v", resource)
+	}
+}
+
+func TestRunnerRejectsTamperedSignedReleasePlan(t *testing.T) {
+	command := runnerCommandWithReleasePlan(domain.RunnerCommand{ID: "tampered-plan", ProjectID: "checkout", Operation: "create", Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"}})
+	command.ReleasePlan.RenderedResources[0].Name = "foreign"
+	result := executeRunnerCommandWithBackend(context.Background(), command, fakeRunnerCommandBackend{})
+	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "verification failed") {
+		t.Fatalf("tampered release plan result = %#v", result)
 	}
 }
 

@@ -4,6 +4,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/envplane/contracts v0.1.49 h1:Qfx6bmzDO1JN3GFQzrRCsh8LcEqWd867z1PHmXzZaLM=
 github.com/envplane/contracts v0.1.49/go.mod h1:/aVUc5NCmh/amgea7odPI1YxjxLf2dfFDvuOieTUgYs=
+github.com/envplane/contracts v0.1.63 h1:oU/1/FKKtbJ7tEtboEVU3dWNzkRS7VEX9JSXb1IasJ4=
+github.com/envplane/contracts v0.1.63/go.mod h1:/aVUc5NCmh/amgea7odPI1YxjxLf2dfFDvuOieTUgYs=
 github.com/envplane/gitops v0.1.1 h1:C9O/Klz8eZVYW3mJdwMjbc/22iFbu1O476bnguUL3Tc=
 github.com/envplane/gitops v0.1.1/go.mod h1:2quF+aWO1KgL8ZoiZqNSR8zGfgEjR0o0kQ22gewOlAQ=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
