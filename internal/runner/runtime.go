@@ -27,7 +27,6 @@ import (
 	"unicode"
 
 	"github.com/envplane/contracts/domain"
-	"github.com/envplane/contracts/sdk/go/envplanesdk"
 	"github.com/envplane/runner/internal/orchestrator"
 	"gopkg.in/yaml.v3"
 )
@@ -1364,13 +1363,8 @@ func classifyRunnerEndpointProbeError(err error) string {
 }
 
 func reportRunnerCommandResult(ctx context.Context, cfg runnerConfig, client *http.Client, commandID string, result domain.RunnerCommandResult) error {
-	sdk := envplanesdk.Client{
-		BaseURL:       cfg.ControlPlaneURL,
-		HTTPClient:    client,
-		TokenProvider: func(context.Context) (string, error) { return cfg.RunnerAuthToken, nil },
-		Headers:       http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}},
-	}
-	return sdk.DoJSON(ctx, http.MethodPost, "/api/v1/runners/commands/"+url.PathEscape(commandID)+"/result", result, nil, "")
+	endpoint := strings.TrimRight(cfg.ControlPlaneURL, "/") + "/api/v1/runners/commands/" + url.PathEscape(commandID) + "/result"
+	return runnerPostJSONWithHeaders(ctx, client, endpoint, cfg.RunnerAuthToken, result, nil, http.Header{runnerCommandAPIVersionHeader: []string{runnerCommandAPIVersion}})
 }
 
 func runnerPostJSON(ctx context.Context, client *http.Client, endpoint string, bearerToken string, payload any, target any) error {

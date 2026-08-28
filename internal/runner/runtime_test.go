@@ -745,3 +745,20 @@ func TestValidateRunnerHelmChartRejectsLegacyLocalPathWithoutExecutingHelm(t *te
 		t.Fatalf("legacy local chart ref must be rejected before helm execution, err=%v called=%v", err, called)
 	}
 }
+
+func TestReportRunnerCommandResultPreservesBoundedAPIErrorDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer runner-token" || r.Header.Get(runnerCommandAPIVersionHeader) != runnerCommandAPIVersion {
+			t.Fatalf("callback headers = %#v", r.Header)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"code":"release_plan_invalid","error":"release plan inventory mismatch"}`))
+	}))
+	defer server.Close()
+
+	err := reportRunnerCommandResult(context.Background(), runnerConfig{ControlPlaneURL: server.URL, RunnerAuthToken: "runner-token"}, server.Client(), "command/one", domain.RunnerCommandResult{})
+	if err == nil || !strings.Contains(err.Error(), "status=422") || !strings.Contains(err.Error(), "code=release_plan_invalid") || !strings.Contains(err.Error(), "detail=release plan inventory mismatch") {
+		t.Fatalf("callback error = %v", err)
+	}
+}
