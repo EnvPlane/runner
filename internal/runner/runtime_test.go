@@ -693,6 +693,19 @@ func TestRunnerRendersReleasePlanDraftBeforeApply(t *testing.T) {
 	}
 }
 
+func TestReleasePlanResourcesDefaultsMissingManifestNamespace(t *testing.T) {
+	resources, err := releasePlanResources([]orchestrator.Manifest{{
+		Path: "deployment.yaml", Kind: "Deployment",
+		Content: []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: workload\n"),
+	}}, "feature", "release")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resources) != 1 || resources[0].Namespace != "feature" || resources[0].Manifest["metadata"].(map[string]any)["namespace"] != "feature" {
+		t.Fatalf("rendered resources = %#v", resources)
+	}
+}
+
 func TestRunnerRejectsTamperedSignedReleasePlan(t *testing.T) {
 	command := runnerCommandWithReleasePlan(domain.RunnerCommand{ID: "tampered-plan", ProjectID: "checkout", Operation: "create", Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"}})
 	command.ReleasePlan.RenderedResources[0].Name = "foreign"

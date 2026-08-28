@@ -1127,10 +1127,10 @@ func releasePlanResources(manifests []orchestrator.Manifest, namespace, releaseN
 		if err := yaml.Unmarshal(item.Content, &manifest); err != nil {
 			return nil, fmt.Errorf("decode rendered manifest %d: %w", index, err)
 		}
-		kind := strings.TrimSpace(fmt.Sprint(manifest["kind"]))
+		kind := manifestString(manifest, "kind")
 		metadata, _ := manifest["metadata"].(map[string]any)
-		name := strings.TrimSpace(fmt.Sprint(metadata["name"]))
-		resourceNamespace := strings.TrimSpace(fmt.Sprint(metadata["namespace"]))
+		name := manifestString(metadata, "name")
+		resourceNamespace := manifestString(metadata, "namespace")
 		if kind == "" {
 			kind = strings.TrimSpace(item.Kind)
 			manifest["kind"] = kind
@@ -1160,6 +1160,17 @@ func releasePlanResources(manifests []orchestrator.Manifest, namespace, releaseN
 		return nil, fmt.Errorf("release plan render returned no resources")
 	}
 	return resources, nil
+}
+
+func manifestString(values map[string]any, key string) string {
+	if values == nil {
+		return ""
+	}
+	value, ok := values[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
 }
 
 func appendUnique(values []string, value string) []string {
