@@ -832,7 +832,10 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 		releaseNamePattern: "{{ .project.id }}-{{ .environment.name }}",
 		timeout:            300,
 		wait:               true,
-		createNamespace:    true,
+		// EnvPlane provisions the exact target namespace and its scoped RBAC
+		// before it dispatches Helm Direct. Requiring Helm to create it would
+		// need a cluster-wide namespace permission, defeating that boundary.
+		createNamespace: false,
 	}
 	rawDeployment, ok := projectConfig.Config["deployment"]
 	if !ok {

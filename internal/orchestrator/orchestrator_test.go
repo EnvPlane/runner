@@ -633,8 +633,8 @@ func TestHelmDirectBackendApplyUsesHelmUpgradeInstall(t *testing.T) {
 	if call.Options.Wait != true {
 		t.Fatalf("expected wait=true")
 	}
-	if call.Options.CreateNamespace != true {
-		t.Fatalf("expected createNamespace=true by default")
+	if call.Options.CreateNamespace {
+		t.Fatalf("expected createNamespace=false by default")
 	}
 	if call.Options.Timeout != 120 {
 		t.Fatalf("timeout = %d", call.Options.Timeout)
