@@ -356,9 +356,8 @@ func Run(logger *slog.Logger) {
 		logger.Error("invalid control-plane TLS configuration", "error", err)
 		return
 	}
-	var registeredNow bool
 	bootstrapRegistrationToken := cfg.RegistrationToken
-	cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
+	cfg, _, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 	if err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
@@ -368,16 +367,6 @@ func Run(logger *slog.Logger) {
 		health.set(false)
 		logger.Error("runner registration failed", "error", err)
 		os.Exit(1)
-	}
-	if registeredNow {
-		if err := fetchRunnerProjectConfig(ctx, cfg, client, logger); err != nil {
-			if isRunnerStaleBootstrapIdentityError(err) {
-				markRunnerStaleBootstrapIdentity(runtimeState, health, logger, err)
-				<-ctx.Done()
-				return
-			}
-			logger.Warn("runner project config fetch failed", "error", err)
-		}
 	}
 	preflight := probeRunnerManagementEndpoint(ctx, cfg, client)
 	initialStatus, initialError := string(domain.RunnerHeartbeatStatusOnline), ""
@@ -393,12 +382,7 @@ func Run(logger *slog.Logger) {
 		}
 		cfg.RunnerAuthToken = ""
 		cfg.RegistrationToken = bootstrapRegistrationToken
-		cfg, registeredNow, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
-		if err == nil && registeredNow {
-			if configErr := fetchRunnerProjectConfig(ctx, cfg, client, logger); configErr != nil {
-				logger.Warn("runner project config fetch failed after auth recovery", "error", configErr)
-			}
-		}
+		cfg, _, err = ensureRunnerRuntimeAuth(ctx, cfg, client, logger)
 		if err == nil {
 			preflight = probeRunnerManagementEndpoint(ctx, cfg, client)
 			initialStatus, initialError = string(domain.RunnerHeartbeatStatusOnline), ""
