@@ -705,6 +705,21 @@ func TestHelmDirectBackendApplyHonorsCreateNamespaceFalse(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendApplyRejectsLegacyCreateNamespaceEscalation(t *testing.T) {
+	executor := &fakeHelmExecutor{}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{ID: "pr-legacy", Project: "proj-legacy", Namespace: "envplane-pr-legacy", Charts: domain.ChartVersions{App: "payments-chart"}}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{"createNamespace": true}},
+	}}
+	if err := backend.Apply(context.Background(), environment, projectConfig); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(executor.calls) != 1 || executor.calls[0].Options.CreateNamespace {
+		t.Fatalf("legacy config escalated Runner namespace permissions: %#v", executor.calls)
+	}
+}
+
 func TestHelmDirectBackendApplyPreservesCustomEnvironmentAndProjectIds(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)

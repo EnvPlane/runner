@@ -909,9 +909,10 @@ func resolveHelmDirectConfig(projectConfig domain.ProjectConfig) helmDirectConfi
 	if value, ok := helmDirectConfigValue["wait"]; ok {
 		config.wait = asBool(value)
 	}
-	if value, ok := helmDirectConfigValue["createNamespace"]; ok {
-		config.createNamespace = asBool(value)
-	}
+	// Target namespaces are pre-provisioned by the management plane together
+	// with finite Runner RBAC. Never honor legacy createNamespace=true here: it
+	// would require cluster-wide namespace permissions at runtime.
+	config.createNamespace = false
 	return config
 }
 
