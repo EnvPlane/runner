@@ -853,6 +853,9 @@ func TestHelmDirectBackendApplyGeneratesValuesFile(t *testing.T) {
 	if !strings.Contains(string(content), "cmsApiTag") || !strings.Contains(string(content), "cmsApiTag: v2") {
 		t.Fatalf("generated values missing tag data: %s", string(content))
 	}
+	if !strings.Contains(string(content), "environmentId: pr-101") || !strings.Contains(string(content), "projectId: proj-101") {
+		t.Fatalf("generated values missing environment identity: %s", string(content))
+	}
 }
 
 func TestHelmDirectBackendApplyIdempotentUpgradeKeepsRelease(t *testing.T) {
