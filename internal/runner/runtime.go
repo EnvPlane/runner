@@ -393,8 +393,8 @@ func Run(logger *slog.Logger) {
 		}
 	}
 	if err != nil {
-		if isRunnerFixtureIdentityReissuedError(err) {
-			prepareRunnerFixtureRecovery(cfg, logger)
+		if isRunnerRuntimeIdentityReissuedError(err) {
+			prepareRunnerRuntimeIdentityRecovery(cfg, logger)
 			return
 		}
 		if isRunnerStaleBootstrapIdentityError(err) {
@@ -597,8 +597,8 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 				status, statusError = string(domain.RunnerHeartbeatStatusDegraded), "management endpoint preflight failed: "+preflight.Code
 			}
 			if err := reportRunnerHeartbeatWithEndpointPreflight(ctx, cfg, client, status, statusError, preflight); err != nil {
-				if isRunnerFixtureIdentityReissuedError(err) {
-					prepareRunnerFixtureRecovery(cfg, logger)
+				if isRunnerRuntimeIdentityReissuedError(err) {
+					prepareRunnerRuntimeIdentityRecovery(cfg, logger)
 					stop()
 					return
 				}
@@ -620,17 +620,17 @@ func runRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.Clie
 	}
 }
 
-// prepareRunnerFixtureRecovery is used only after the server explicitly
-// reports fixture_identity_reissued. It clears the disposable persisted auth
-// credential; the Deployment restart policy then starts the same release and
-// registers again from its mounted bootstrap Secret. It never touches or logs
-// the raw bootstrap credential.
-func prepareRunnerFixtureRecovery(cfg runnerConfig, logger *slog.Logger) {
+// prepareRunnerRuntimeIdentityRecovery is used only after the server explicitly
+// reports that a chart-managed runtime identity was reissued. It clears the
+// persisted auth credential; the Deployment restart policy then starts the
+// same release and registers again from its mounted bootstrap Secret. It never
+// touches or logs the raw bootstrap credential.
+func prepareRunnerRuntimeIdentityRecovery(cfg runnerConfig, logger *slog.Logger) {
 	if err := clearRuntimeToken(cfg.RunnerAuthTokenFile); err != nil {
 		logger.Error("clear stale runner auth token", "error", err)
 		return
 	}
-	logger.Warn("runner fixture identity reissued; restarting automatically for registration", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
+	logger.Warn("runner runtime identity reissued; restarting automatically for registration", "project_id", cfg.ProjectID, "runner_id", cfg.RunnerID)
 }
 
 func runRunnerCommands(ctx context.Context, cfg runnerConfig, client *http.Client, state *runnerRuntimeState, health *runnerHealth, logger *slog.Logger) {
@@ -840,12 +840,13 @@ func isRunnerStaleBootstrapIdentityError(err error) bool {
 	return strings.Contains(message, "bootstrap session not found") || strings.Contains(message, "runner bootstrap credentials have expired")
 }
 
-func isRunnerFixtureIdentityReissuedError(err error) bool {
+func isRunnerRuntimeIdentityReissuedError(err error) bool {
 	var apiError runnerAPIError
-	if errors.As(err, &apiError) && apiError.code == "fixture_identity_reissued" {
-		return true
+	if errors.As(err, &apiError) {
+		return apiError.code == "fixture_identity_reissued" || apiError.code == "same_cluster_identity_reissued"
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "fixture_identity_reissued")
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "fixture_identity_reissued") || strings.Contains(message, "same_cluster_identity_reissued")
 }
 
 func isRunnerAuthTokenNotIssuedError(err error) bool {
