@@ -681,11 +681,14 @@ func (b *HelmDirectBackend) targetNamespace(environment domain.Environment, conf
 		}
 		return strings.TrimSpace(environment.Project)
 	default:
-		if rendered := strings.TrimSpace(b.renderTemplatePattern(config.namespacePattern, environment)); rendered != "" {
-			return rendered
-		}
+		// The control plane persists the collision-safe dedicated target before
+		// dispatch. Runner render/apply must retain that exact namespace instead
+		// of re-rendering a PR-number-only pattern shared by other repositories.
 		if namespace != "" {
 			return namespace
+		}
+		if rendered := strings.TrimSpace(b.renderTemplatePattern(config.namespacePattern, environment)); rendered != "" {
+			return rendered
 		}
 		return strings.TrimSpace(environment.ID)
 	}

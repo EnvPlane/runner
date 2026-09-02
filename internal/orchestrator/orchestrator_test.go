@@ -441,6 +441,26 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendPreservesPersistedDedicatedNamespace(t *testing.T) {
+	backend := NewHelmDirectBackend(nil)
+	environment := domain.Environment{
+		ID: "frontend-mr-1", Project: "project", Namespace: "envplane-pr-1-a1b2c3d4",
+		Source: domain.SCMSource{PullRequestID: "1"},
+	}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+			"namespaceMode": "dedicated", "namespacePattern": "envplane-pr-{{ .PRNumber }}",
+		}},
+	}}
+	_, namespace, err := backend.DeploymentTarget(environment, projectConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if namespace != environment.Namespace {
+		t.Fatalf("dedicated namespace was re-rendered from a colliding PR number: %q", namespace)
+	}
+}
+
 func TestHelmDirectBackendUsesGenericComponentValueContract(t *testing.T) {
 	digest := "sha256:" + strings.Repeat("a", 64)
 	backend := NewHelmDirectBackend(nil)
