@@ -724,7 +724,7 @@ func normalizeHelmReleaseName(value string) (string, error) {
 	}
 	name := strings.Trim(normalized.String(), "-")
 	if name == "" {
-		return "", fmt.Errorf("Helm release name pattern rendered an empty name")
+		return "", fmt.Errorf("helm release name pattern rendered an empty name")
 	}
 	if len(name) <= helmReleaseNameMaxLength {
 		return name, nil
@@ -733,7 +733,7 @@ func normalizeHelmReleaseName(value string) (string, error) {
 	prefixLength := helmReleaseNameMaxLength - len(digest) - 1
 	prefix := strings.TrimRight(name[:prefixLength], "-")
 	if prefix == "" {
-		return "", fmt.Errorf("Helm release name pattern rendered an invalid name")
+		return "", fmt.Errorf("helm release name pattern rendered an invalid name")
 	}
 	return prefix + "-" + digest, nil
 }
