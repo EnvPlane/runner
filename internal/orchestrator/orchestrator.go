@@ -816,7 +816,7 @@ func (b *HelmDirectBackend) renderIdentityValues(environment domain.Environment)
 func (b *HelmDirectBackend) renderHelmImageValues(environment domain.Environment) []helmDirectValue {
 	valuesByName := map[string]string{}
 	for _, service := range environment.Services {
-		key := normalizeHelmServiceTag(strings.TrimSpace(service.Name))
+		key := normalizeHelmServiceTag(strings.TrimSpace(service.Name), environment.Product)
 		if key == "" {
 			continue
 		}
@@ -827,11 +827,25 @@ func (b *HelmDirectBackend) renderHelmImageValues(environment domain.Environment
 		valuesByName[key] = tag
 	}
 	for _, service := range environment.Base.Services {
-		key := normalizeHelmServiceTag(strings.TrimSpace(service.Name))
+		key := normalizeHelmServiceTag(strings.TrimSpace(service.Name), environment.Product)
 		if key == "" {
 			continue
 		}
 		valuesByName[key] = "latest"
+	}
+	if strings.EqualFold(strings.TrimSpace(environment.Product), "generic") {
+		for _, component := range environment.Components {
+			prefix := genericHelmServiceValuePrefix(component.Service)
+			if prefix == "" {
+				continue
+			}
+			if image := strings.TrimSpace(component.Image); image != "" {
+				valuesByName[prefix+"Image"] = image
+			}
+			if digest := strings.TrimSpace(component.ImageDigest); digest != "" {
+				valuesByName[prefix+"Digest"] = digest
+			}
+		}
 	}
 	for key, value := range environment.Overrides {
 		trimmedKey := strings.TrimSpace(key)
@@ -936,7 +950,12 @@ func isDirectHelmChartArchive(chartRef string) bool {
 	return strings.HasSuffix(strings.ToLower(parsed.Path), ".tgz")
 }
 
-func normalizeHelmServiceTag(name string) string {
+func normalizeHelmServiceTag(name, product string) string {
+	if strings.EqualFold(strings.TrimSpace(product), "generic") {
+		if prefix := genericHelmServiceValuePrefix(name); prefix != "" {
+			return prefix + "Tag"
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "":
 		return ""
@@ -971,6 +990,23 @@ func normalizeHelmServiceTag(name string) string {
 	default:
 		return serviceTagKeyLike(name)
 	}
+}
+
+func genericHelmServiceValuePrefix(name string) string {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(name)), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	})
+	if len(parts) == 0 {
+		return ""
+	}
+	result := parts[0]
+	for _, part := range parts[1:] {
+		if part == "" {
+			continue
+		}
+		result += strings.ToUpper(part[:1]) + part[1:]
+	}
+	return result
 }
 
 func serviceTagKeyLike(name string) string {

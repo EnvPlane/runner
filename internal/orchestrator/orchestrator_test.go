@@ -441,6 +441,37 @@ func TestHelmDirectBackendRenderMinimal(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendUsesGenericComponentValueContract(t *testing.T) {
+	digest := "sha256:" + strings.Repeat("a", 64)
+	backend := NewHelmDirectBackend(nil)
+	rendered := backend.renderHelmImageValues(domain.Environment{
+		Product:  "generic",
+		Services: []domain.ServiceOverride{{Name: "backend", Tag: "commit-sha"}},
+		Components: []domain.EnvironmentComponent{{
+			ComponentID: "backend",
+			Service:     "backend",
+			Image:       "registry.gitlab.com/envplane/backend@" + digest,
+			ImageDigest: digest,
+		}},
+	})
+	values := make(map[string]string, len(rendered))
+	for _, item := range rendered {
+		values[item.Name] = item.Value
+	}
+	if got := values["backendTag"]; got != "commit-sha" {
+		t.Fatalf("backendTag = %q", got)
+	}
+	if got := values["backendImage"]; got != "registry.gitlab.com/envplane/backend@"+digest {
+		t.Fatalf("backendImage = %q", got)
+	}
+	if got := values["backendDigest"]; got != digest {
+		t.Fatalf("backendDigest = %q", got)
+	}
+	if got := values["cmsBackendTag"]; got != "" {
+		t.Fatalf("generic chart unexpectedly received legacy cmsBackendTag = %q", got)
+	}
+}
+
 func TestHelmDirectBackendDeploymentTargetMatchesRenderedRelease(t *testing.T) {
 	backend := NewHelmDirectBackend(nil)
 	environment := domain.Environment{
