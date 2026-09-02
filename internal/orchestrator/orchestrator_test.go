@@ -551,7 +551,7 @@ func TestHelmDirectBackendRenderCustomEnvironmentMetadataAndValues(t *testing.T)
 		t.Fatalf("yaml: %v", err)
 	}
 
-	wantName := "custom-project-pr-custom-1-feature/custom-1234-deadbeef"
+	wantName := "custom-project-pr-custom-1-feature-custom-0229916786"
 	if decoded.Spec.Release.Name != wantName {
 		t.Fatalf("release name = %q, want %q", decoded.Spec.Release.Name, wantName)
 	}
@@ -734,11 +734,41 @@ func TestHelmDirectBackendApplyPreservesCustomEnvironmentAndProjectIds(t *testin
 		t.Fatalf("expected 1 helm call, got %d", len(executor.calls))
 	}
 	call := executor.calls[0]
-	if call.Options.ReleaseName != "acme-payment-service::feature/custom-environment" {
+	if call.Options.ReleaseName != "acme-payment-service-feature-custom-environment" {
 		t.Fatalf("release name = %q", call.Options.ReleaseName)
 	}
 	if call.Options.Namespace != "custom-ns" {
 		t.Fatalf("namespace = %q", call.Options.Namespace)
+	}
+}
+
+func TestHelmDirectBackendApplyBoundsLongReleaseNamesWithStableHash(t *testing.T) {
+	executor := &fakeHelmExecutor{}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	projectConfig := domain.ProjectConfig{Config: map[string]any{"deployment": map[string]any{
+		"backend": "helm_direct", "helmDirect": map[string]any{"releaseNamePattern": "{{ .project.id }}-{{ .environment.id }}"},
+	}}}
+	environment := domain.Environment{
+		ID: "e2e-pr-environment-20260902-gitl-e0653427", Project: "quota-check-20260901", Namespace: "envplane-pr-1",
+	}
+	if err := backend.Apply(context.Background(), environment, projectConfig); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if len(executor.calls) != 1 {
+		t.Fatalf("expected one Helm call, got %d", len(executor.calls))
+	}
+	releaseName := executor.calls[0].Options.ReleaseName
+	if len(releaseName) != helmReleaseNameMaxLength || !strings.HasPrefix(releaseName, "quota-check-20260901-e2e-pr-environment") {
+		t.Fatalf("bounded release name = %q (length %d)", releaseName, len(releaseName))
+	}
+
+	second := environment
+	second.ID += "-different"
+	if err := backend.Apply(context.Background(), second, projectConfig); err != nil {
+		t.Fatalf("second apply: %v", err)
+	}
+	if executor.calls[1].Options.ReleaseName == releaseName {
+		t.Fatalf("different long identities collided at %q", releaseName)
 	}
 }
 

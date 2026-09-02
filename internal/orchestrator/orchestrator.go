@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -700,7 +701,41 @@ func (b *HelmDirectBackend) renderReleaseName(environment domain.Environment, pr
 	if err := t.Execute(&output, b.helmDirectTemplateData(environment)); err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(output.String()), nil
+	return normalizeHelmReleaseName(output.String())
+}
+
+const helmReleaseNameMaxLength = 53
+
+func normalizeHelmReleaseName(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	var normalized strings.Builder
+	lastDash := false
+	for _, r := range strings.ToLower(raw) {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if valid {
+			normalized.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if normalized.Len() > 0 && !lastDash {
+			normalized.WriteByte('-')
+			lastDash = true
+		}
+	}
+	name := strings.Trim(normalized.String(), "-")
+	if name == "" {
+		return "", fmt.Errorf("Helm release name pattern rendered an empty name")
+	}
+	if len(name) <= helmReleaseNameMaxLength {
+		return name, nil
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256([]byte(name)))[:10]
+	prefixLength := helmReleaseNameMaxLength - len(digest) - 1
+	prefix := strings.TrimRight(name[:prefixLength], "-")
+	if prefix == "" {
+		return "", fmt.Errorf("Helm release name pattern rendered an invalid name")
+	}
+	return prefix + "-" + digest, nil
 }
 
 func (b *HelmDirectBackend) renderTemplatePattern(pattern string, environment domain.Environment) string {
