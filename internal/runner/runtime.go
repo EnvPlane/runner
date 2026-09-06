@@ -62,6 +62,7 @@ type runnerConfig struct {
 	RunnerVersion                        string
 	FeatureEnvWriterMode                 string
 	FeatureEnvWriterNamespaces           []string
+	HelmAllowedChartHosts                []string
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -105,6 +106,7 @@ func runnerConfigFromEnv() runnerConfig {
 		RunnerVersion:                        getenv("ENVPLANE_RUNNER_VERSION", "dev"),
 		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPLANE_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
 		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPLANE_FEATURE_ENV_WRITER_NAMESPACES", "")),
+		HelmAllowedChartHosts:                normalizeRunnerHostList(getenv("ENVPLANE_HELM_ALLOWED_CHART_HOSTS", "")),
 	}
 	cfg.EnvDiagnostics = legacyDiagnostics()
 	return cfg
@@ -123,6 +125,23 @@ func normalizeRunnerNamespaceList(raw string) []string {
 		}
 		seen[namespace] = struct{}{}
 		items = append(items, namespace)
+	}
+	return items
+}
+
+func normalizeRunnerHostList(raw string) []string {
+	seen := map[string]struct{}{}
+	items := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		host := strings.ToLower(strings.TrimSpace(value))
+		if host == "" {
+			continue
+		}
+		if _, exists := seen[host]; exists {
+			continue
+		}
+		seen[host] = struct{}{}
+		items = append(items, host)
 	}
 	return items
 }
@@ -969,7 +988,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	case "validate_helm_chart":
 		result.Namespace = ""
 		result.ReleaseName = ""
-		if err := validateRunnerHelmChart(ctx, command.ChartRef, command.ChartVersion); err != nil {
+		if err := validateRunnerHelmChart(ctx, cfg, command.ChartRef, command.ChartVersion); err != nil {
 			result.ErrorCode, result.Error = classifyHelmChartPreflightError(err)
 			return result
 		}
@@ -1220,10 +1239,35 @@ func projectConfigForRunnerCommand(command domain.RunnerCommand) domain.ProjectC
 	return projectConfig
 }
 
-func validateRunnerHelmChart(ctx context.Context, chartRef, chartVersion string) error {
-	return validateRunnerHelmChartWithCommand(ctx, chartRef, chartVersion, func(ctx context.Context, args ...string) ([]byte, error) {
+func validateRunnerHelmChart(ctx context.Context, cfg runnerConfig, chartRef, chartVersion string) error {
+	return validateRunnerHelmChartWithConfig(ctx, cfg, chartRef, chartVersion, func(ctx context.Context, args ...string) ([]byte, error) {
 		return exec.CommandContext(ctx, "helm", args...).CombinedOutput()
 	})
+}
+
+func validateRunnerHelmChartWithConfig(ctx context.Context, cfg runnerConfig, chartRef, chartVersion string, run func(context.Context, ...string) ([]byte, error)) error {
+	if !runnerHelmChartHostAllowed(chartRef, cfg.HelmAllowedChartHosts) {
+		return fmt.Errorf("invalid chart reference: chart host is not allowlisted")
+	}
+	return validateRunnerHelmChartWithCommand(ctx, chartRef, chartVersion, run)
+}
+
+func runnerHelmChartHostAllowed(chartRef string, allowedHosts []string) bool {
+	// Repository aliases use the runner's local Helm configuration; direct network references require an explicit host allowlist.
+	parsed, err := url.Parse(strings.TrimSpace(chartRef))
+	if err != nil || (parsed.Scheme != "oci" && parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return true
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host == "" || len(allowedHosts) == 0 {
+		return false
+	}
+	for _, allowed := range allowedHosts {
+		if host == strings.ToLower(strings.TrimSpace(allowed)) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef, chartVersion string, run func(context.Context, ...string) ([]byte, error)) error {

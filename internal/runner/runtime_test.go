@@ -691,6 +691,35 @@ func TestRunnerPreflightAndHelmExecutorRejectSameChartReferences(t *testing.T) {
 	}
 }
 
+func TestRunnerHelmChartPreflightRejectsNonAllowlistedHostBeforeHelm(t *testing.T) {
+	called := false
+	err := validateRunnerHelmChartWithConfig(context.Background(), runnerConfig{
+		HelmAllowedChartHosts: []string{"charts.example.test"},
+	}, "https://169.254.169.254/latest/meta-data/", "", func(_ context.Context, _ ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "not allowlisted") || called {
+		t.Fatalf("non-allowlisted chart host result = err %v, called=%v", err, called)
+	}
+}
+
+func TestRunnerHelmChartPreflightAllowsConfiguredHost(t *testing.T) {
+	called := false
+	err := validateRunnerHelmChartWithConfig(context.Background(), runnerConfig{
+		HelmAllowedChartHosts: []string{"registry.example.test"},
+	}, "oci://registry.example.test/charts/app", "1.2.3", func(_ context.Context, args ...string) ([]byte, error) {
+		called = true
+		if strings.Join(args, " ") != "show chart oci://registry.example.test/charts/app --version 1.2.3" {
+			t.Fatalf("Helm arguments = %q", args)
+		}
+		return []byte("apiVersion: v2\nname: app\n"), nil
+	})
+	if err != nil || !called {
+		t.Fatalf("configured chart host result = err %v, called=%v", err, called)
+	}
+}
+
 func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	config := projectConfigForRunnerCommand(domain.RunnerCommand{
 		ChartRef:     "oci://registry.example.com/charts/orders",

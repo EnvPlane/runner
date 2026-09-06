@@ -37,6 +37,12 @@ docker build -t envplane-runner:dev .
 The `runner` compatibility argument and `runner-connectivity-check` support
 safe upgrades of existing Helm releases.
 
+Set `ENVPLANE_HELM_ALLOWED_CHART_HOSTS` to a comma-separated allowlist of
+registry hosts used by direct `oci://` or `http(s)://` chart references.
+Repository aliases are resolved through the runner's local Helm repository
+configuration; direct references to hosts not in this allowlist are rejected
+before Helm is invoked, including metadata and cluster-internal addresses.
+
 ## Related components
 
 - [Control Plane](https://github.com/EnvPlane/control-plane)
