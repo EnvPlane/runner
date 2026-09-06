@@ -108,7 +108,7 @@ ON CONFLICT (id) DO UPDATE SET
 	ttl = EXCLUDED.ttl,
 	payload = EXCLUDED.payload,
 	updated_at = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at > environments.updated_at`,
+WHERE EXCLUDED.updated_at >= environments.updated_at`,
 		record.ID, record.ProjectID, record.PRID, record.Branch, record.CommitSHA,
 		record.Status, record.Type, record.TTL, string(payload), record.CreatedAt, record.UpdatedAt)
 	if err != nil {

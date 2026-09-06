@@ -127,7 +127,7 @@ func (s *JSONStore) Save(environment domain.Environment) error {
 
 	record := NewEnvironmentRecord(environment)
 	if existing, ok := s.data[environment.ID]; ok {
-		if record.UpdatedAt.IsZero() || !record.UpdatedAt.After(existing.UpdatedAt) {
+		if record.UpdatedAt.IsZero() || record.UpdatedAt.Before(existing.UpdatedAt) {
 			return ErrConflict
 		}
 	}
