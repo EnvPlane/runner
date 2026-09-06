@@ -1102,6 +1102,16 @@ func validateReleasePlanCommand(command domain.RunnerCommand, cfg runnerConfig) 
 	if err := domain.VerifyReleasePlanReference(*command.ReleasePlan, ref, publicKey, domain.ReleasePlanRunnerIdentity{TenantID: tenantID, ProjectID: cfg.ProjectID, ClusterID: cfg.ClusterID, RunnerID: cfg.RunnerID}, namespaces, kinds); err != nil {
 		return fmt.Errorf("release plan verification failed: %w", err)
 	}
+	if strings.TrimSpace(command.ReleasePlan.ExecutionInputDigest) == "" {
+		return fmt.Errorf("release plan execution input binding is missing")
+	}
+	executionInputDigest, err := domain.ReleasePlanExecutionInputDigest(command.Environment, command.ProjectConfig, command.ChartRef, command.ChartVersion, command.ProjectConfigVersion)
+	if err != nil {
+		return fmt.Errorf("release plan execution input binding could not be calculated: %w", err)
+	}
+	if executionInputDigest != command.ReleasePlan.ExecutionInputDigest {
+		return fmt.Errorf("release plan execution input binding mismatch")
+	}
 	return nil
 }
 

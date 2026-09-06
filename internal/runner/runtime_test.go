@@ -38,7 +38,8 @@ func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCom
 		command.ProjectID = command.Environment.Project
 	}
 	resource := domain.RenderedResource{ResourceID: "HelmDirect/" + command.Environment.Namespace + "/" + command.Environment.ID, Kind: "HelmDirect", Namespace: command.Environment.Namespace, Name: command.Environment.ID, Manifest: map[string]any{"apiVersion": "envplane.io/v1", "kind": "HelmDirect", "metadata": map[string]any{"name": command.Environment.ID, "namespace": command.Environment.Namespace}}, Digest: "sha256:resource"}
-	plan := domain.EnvironmentReleasePlan{ContractVersion: domain.EnvironmentTemplateContractVersion, PlanID: "release-plan-test", TenantID: tenantID, ProjectID: command.ProjectID, EnvironmentID: command.Environment.ID, TemplateRevisionID: "revision-test", TemplateDigest: "sha256:template", Backend: domain.DeploymentBackendHelmDirect, Ownership: []domain.OwnershipRecord{{Kind: resource.Kind, Namespace: resource.Namespace, Name: resource.Name}}, RenderedResources: []domain.RenderedResource{resource}, InputDigest: "sha256:input"}
+	executionInputDigest, _ := domain.ReleasePlanExecutionInputDigest(command.Environment, command.ProjectConfig, command.ChartRef, command.ChartVersion, command.ProjectConfigVersion)
+	plan := domain.EnvironmentReleasePlan{ContractVersion: domain.EnvironmentTemplateContractVersion, PlanID: "release-plan-test", TenantID: tenantID, ProjectID: command.ProjectID, EnvironmentID: command.Environment.ID, TemplateRevisionID: "revision-test", TemplateDigest: "sha256:template", Backend: domain.DeploymentBackendHelmDirect, Ownership: []domain.OwnershipRecord{{Kind: resource.Kind, Namespace: resource.Namespace, Name: resource.Name}}, RenderedResources: []domain.RenderedResource{resource}, InputDigest: "sha256:input", ExecutionInputDigest: executionInputDigest}
 	plan.Digest, _ = plan.CanonicalDigest()
 	publicKey, privateKey, _ := ed25519.GenerateKey(rand.Reader)
 	ref, _ := domain.SignReleasePlanReference(plan, "key-test", privateKey)
@@ -728,6 +729,25 @@ func TestRunnerRejectsReleasePlanForForeignProjectIdentity(t *testing.T) {
 	result := executeRunnerCommandWithBackend(context.Background(), cfg, command, fakeRunnerCommandBackend{})
 	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "identity mismatch") {
 		t.Fatalf("foreign project result = %#v", result)
+	}
+}
+
+func TestRunnerRejectsReleasePlanWhenHelmExecutionInputsAreTampered(t *testing.T) {
+	command := runnerCommandWithReleasePlan(domain.RunnerCommand{
+		ID: "tampered-helm-inputs", ProjectID: "checkout", Operation: "create",
+		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
+		ProjectConfig: domain.ProjectConfig{Config: map[string]any{
+			"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+				"chartRef": "oci://registry.example/charts/chart-a", "chartVersion": "1.0.0",
+			}},
+		}},
+	})
+	deployment := command.ProjectConfig.Config["deployment"].(map[string]any)
+	helmDirect := deployment["helmDirect"].(map[string]any)
+	helmDirect["chartRef"] = "oci://registry.example/charts/chart-b"
+	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, command, fakeRunnerCommandBackend{})
+	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "execution input binding mismatch") {
+		t.Fatalf("tampered Helm input result = %#v", result)
 	}
 }
 
