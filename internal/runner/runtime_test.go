@@ -28,6 +28,16 @@ type fakeRunnerCommandBackend struct {
 	status domain.EnvironmentStatus
 }
 
+type recordingRunnerCommandBackend struct {
+	fakeRunnerCommandBackend
+	applyCalls int
+}
+
+func (b *recordingRunnerCommandBackend) Apply(context.Context, domain.Environment, domain.ProjectConfig) error {
+	b.applyCalls++
+	return nil
+}
+
 func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCommand {
 	return runnerCommandWithReleasePlanResource(command, command.Environment.Namespace, "HelmDirect")
 }
@@ -68,6 +78,29 @@ func TestRunnerRejectsReleasePlanResourceOutsideIndependentInventoryGuard(t *tes
 	result := executeRunnerCommandWithBackend(context.Background(), cfg, command, fakeRunnerCommandBackend{})
 	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "outside exact inventory guard") {
 		t.Fatalf("foreign inventory result = %#v", result)
+	}
+}
+
+func TestRunnerRejectsUnallowlistedHelmChartBeforeApply(t *testing.T) {
+	for _, operation := range []string{"create", "recreate"} {
+		t.Run(operation, func(t *testing.T) {
+			command := runnerCommandWithReleasePlan(domain.RunnerCommand{
+				ID: operation + "-unallowlisted-chart", ProjectID: "checkout", Operation: operation,
+				Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
+				ProjectConfig: domain.ProjectConfig{Config: map[string]any{
+					"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+						"chartRef": "oci://evil.example/charts/app",
+					}},
+				}},
+			})
+			backend := &recordingRunnerCommandBackend{}
+			result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{
+				ProjectID: "checkout", HelmAllowedChartHosts: []string{"registry.example"},
+			}, command, backend)
+			if result.ErrorCode != "helm_chart_host_not_allowlisted" || backend.applyCalls != 0 {
+				t.Fatalf("result=%#v applyCalls=%d", result, backend.applyCalls)
+			}
+		})
 	}
 }
 

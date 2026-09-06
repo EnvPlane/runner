@@ -1057,6 +1057,12 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 		result.Status = "succeeded"
 		return result
 	case "create", "recreate":
+		chartRef := runnerHelmChartRef(command, projectConfig)
+		if !runnerHelmChartHostAllowed(chartRef, cfg.HelmAllowedChartHosts) {
+			result.ErrorCode = "helm_chart_host_not_allowlisted"
+			result.Error = "invalid chart reference: chart host is not allowlisted"
+			return result
+		}
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
@@ -1115,6 +1121,16 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	}
 	result.Status = "succeeded"
 	return result
+}
+
+func runnerHelmChartRef(command domain.RunnerCommand, projectConfig domain.ProjectConfig) string {
+	if chartRef := strings.TrimSpace(command.ChartRef); chartRef != "" {
+		return chartRef
+	}
+	deployment, _ := projectConfig.Config["deployment"].(map[string]any)
+	helmDirect, _ := deployment["helmDirect"].(map[string]any)
+	chartRef, _ := helmDirect["chartRef"].(string)
+	return strings.TrimSpace(chartRef)
 }
 
 func validateReleasePlanCommand(command domain.RunnerCommand, cfg runnerConfig) error {
