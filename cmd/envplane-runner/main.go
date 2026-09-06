@@ -8,9 +8,8 @@ import (
 	"github.com/envplane/runner/internal/sandbox"
 )
 
-// Keep the sandbox validator reachable from the production binary. Typed
-// sandbox execution is invoked by the command gateway when enabled; startup
-// does not launch a sandbox or inspect customer data.
+// ValidateLaunch is compiled into the binary for the future sandbox execution path.
+// The current runner command path does not invoke sandbox execution or this validator.
 var _ = sandbox.ValidateLaunch
 
 func main() {

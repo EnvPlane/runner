@@ -43,6 +43,11 @@ Repository aliases are resolved through the runner's local Helm repository
 configuration; direct references to hosts not in this allowlist are rejected
 before Helm is invoked, including metadata and cluster-internal addresses.
 
+The typed sandbox validator is currently not connected to the runner command
+path. It must not be treated as an active runtime security control until a
+sandbox execution gateway invokes `sandbox.ValidateLaunch` and adds integration
+coverage for that path.
+
 ## Related components
 
 - [Control Plane](https://github.com/EnvPlane/control-plane)
