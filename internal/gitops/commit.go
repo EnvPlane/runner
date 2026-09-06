@@ -65,6 +65,12 @@ func NewCommitService(dir string, push bool, remote string, branch string, autho
 }
 
 func (s *CommitService) Commit(ctx context.Context, message string) (CommitResult, error) {
+	if err := validateGitRef("push remote", s.pushRemote); err != nil {
+		return CommitResult{}, err
+	}
+	if err := validateGitRef("push branch", s.pushBranch); err != nil {
+		return CommitResult{}, err
+	}
 	if message == "" {
 		message = "envplane: update gitops manifests"
 	}

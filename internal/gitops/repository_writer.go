@@ -62,6 +62,17 @@ func NewRepositoryWriter(target RepositoryTarget) (*RepositoryWriter, error) {
 	if target.PushBranch == "" {
 		target.PushBranch = target.Branch
 	}
+	target.PushRemote = strings.TrimSpace(target.PushRemote)
+	target.PushBranch = strings.TrimSpace(target.PushBranch)
+	if err := validateGitRef("branch", target.Branch); err != nil {
+		return nil, err
+	}
+	if err := validateGitRef("push remote", target.PushRemote); err != nil {
+		return nil, err
+	}
+	if err := validateGitRef("push branch", target.PushBranch); err != nil {
+		return nil, err
+	}
 	if target.BranchStrategy == "pull-request" {
 		target.CreatePullRequest = true
 	}
@@ -233,6 +244,13 @@ func validateRepositoryTarget(rawURL, path string) error {
 		if part == ".." {
 			return fmt.Errorf("gitops repository path traversal is not allowed")
 		}
+	}
+	return nil
+}
+
+func validateGitRef(label, value string) error {
+	if strings.HasPrefix(strings.TrimSpace(value), "-") {
+		return fmt.Errorf("gitops %s uses a forbidden option-like value", label)
 	}
 	return nil
 }

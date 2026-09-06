@@ -151,6 +151,24 @@ func TestRepositoryWriterClonesWritesSubdirAndPushes(t *testing.T) {
 	}
 }
 
+func TestRepositoryWriterRejectsOptionLikeGitTargets(t *testing.T) {
+	tests := []struct {
+		name   string
+		target RepositoryTarget
+	}{
+		{name: "branch", target: RepositoryTarget{URL: "https://git.example/repo.git", Branch: "--upload-pack=/tmp/evil", Workspace: "/tmp/worktree"}},
+		{name: "push remote", target: RepositoryTarget{URL: "https://git.example/repo.git", Branch: "main", PushRemote: "--receive-pack=/tmp/evil", Workspace: "/tmp/worktree"}},
+		{name: "push branch", target: RepositoryTarget{URL: "https://git.example/repo.git", Branch: "main", PushBranch: "--exec=/tmp/evil", Workspace: "/tmp/worktree"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := NewRepositoryWriter(test.target); err == nil {
+				t.Fatalf("option-like %s was accepted", test.name)
+			}
+		})
+	}
+}
+
 func TestRepositoryWriterBranchStrategyPushesEnvironmentBranch(t *testing.T) {
 	remote := filepath.Join(t.TempDir(), "remote.git")
 	run(t, "", "git", "init", "--bare", remote)

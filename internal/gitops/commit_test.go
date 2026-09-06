@@ -101,6 +101,25 @@ func TestCommitServicePushConflictReturnsConflictError(t *testing.T) {
 	}
 }
 
+func TestCommitServiceRejectsOptionLikePushTargets(t *testing.T) {
+	tests := []struct {
+		name   string
+		remote string
+		branch string
+	}{
+		{name: "remote", remote: "--receive-pack=/tmp/evil", branch: "main"},
+		{name: "branch", remote: "origin", branch: "--upload-pack=/tmp/evil"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := NewCommitService(t.TempDir(), true, test.remote, test.branch, "envplane", "envplane@example.com")
+			if _, err := service.Commit(context.Background(), "test"); err == nil {
+				t.Fatalf("option-like push %s was accepted", test.name)
+			}
+		})
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
