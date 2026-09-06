@@ -1317,6 +1317,42 @@ func TestHelmDirectBackendStatusUsesCustomReleaseNameForReadiness(t *testing.T) 
 	}
 }
 
+func TestHelmDirectBackendRecoversPendingRelease(t *testing.T) {
+	executor := &fakeHelmExecutor{statusResult: HelmStatus{Found: true, Status: "pending-upgrade"}}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{ID: "pr-pending", Project: "orders", Namespace: "envplane-pr-pending"}
+
+	status, err := backend.Status(context.Background(), environment, domain.ProjectConfig{})
+	if err != nil {
+		t.Fatalf("pending status: %v", err)
+	}
+	if status != domain.StatusCreating {
+		t.Fatalf("pending status = %q, want creating while rollback is requested", status)
+	}
+	if len(executor.rollbackCalls) != 1 || executor.rollbackCalls[0].Options.ReleaseName != "orders-pr-pending" {
+		t.Fatalf("rollback calls = %#v", executor.rollbackCalls)
+	}
+
+	executor.statusResult.Status = "deployed"
+	executor.readinessResult = true
+	status, err = backend.Status(context.Background(), environment, domain.ProjectConfig{})
+	if err != nil || status != domain.StatusReady {
+		t.Fatalf("recovered status = %q, err=%v", status, err)
+	}
+}
+
+func TestHelmDirectBackendFailsWhenPendingReleaseRecoveryFails(t *testing.T) {
+	executor := &fakeHelmExecutor{
+		statusResult: HelmStatus{Found: true, Status: "pending-install"},
+		rollbackErr:  errors.New("no previous release revision"),
+	}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	status, err := backend.Status(context.Background(), domain.Environment{ID: "pr-pending", Project: "orders", Namespace: "feature"}, domain.ProjectConfig{})
+	if status != domain.StatusFailed || err == nil || !strings.Contains(err.Error(), "recovery failed") {
+		t.Fatalf("failed recovery result = status %q, err=%v", status, err)
+	}
+}
+
 func TestFluxBackendStatusUsesFluxStatusAndResources(t *testing.T) {
 	backend := NewFluxBackend(nil)
 
@@ -1784,6 +1820,8 @@ type fakeHelmExecutor struct {
 	statusResult         HelmStatus
 	readinessResult      bool
 	readinessErr         error
+	rollbackCalls        []helmRollbackCall
+	rollbackErr          error
 }
 
 type helmUpgradeCall struct {
@@ -1803,6 +1841,10 @@ type helmReadinessCall struct {
 	Options HelmReadinessOptions
 }
 
+type helmRollbackCall struct {
+	Options HelmRollbackOptions
+}
+
 func (f *fakeHelmExecutor) UpgradeInstall(_ context.Context, options HelmUpgradeOptions) error {
 	call := helmUpgradeCall{Options: options}
 	if options.ValuesFile != "" {
@@ -1820,6 +1862,11 @@ func (f *fakeHelmExecutor) Uninstall(_ context.Context, options HelmUninstallOpt
 		return f.uninstallErr
 	}
 	return f.err
+}
+
+func (f *fakeHelmExecutor) Rollback(_ context.Context, options HelmRollbackOptions) error {
+	f.rollbackCalls = append(f.rollbackCalls, helmRollbackCall{Options: options})
+	return f.rollbackErr
 }
 
 func (f *fakeHelmExecutor) DeleteNamespace(_ context.Context, namespace string) error {

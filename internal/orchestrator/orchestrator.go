@@ -62,6 +62,7 @@ type HelmUpgradeOptions struct {
 type HelmExecutor interface {
 	UpgradeInstall(ctx context.Context, options HelmUpgradeOptions) error
 	Uninstall(ctx context.Context, options HelmUninstallOptions) error
+	Rollback(ctx context.Context, options HelmRollbackOptions) error
 	DeleteNamespace(ctx context.Context, namespace string) error
 	Status(ctx context.Context, options HelmStatusOptions) (HelmStatus, error)
 	IsNamespaceManaged(ctx context.Context, namespace, projectID, environmentID string) (bool, error)
@@ -161,6 +162,11 @@ type HelmUninstallOptions struct {
 	Namespace   string
 }
 
+type HelmRollbackOptions struct {
+	ReleaseName string
+	Namespace   string
+}
+
 func (e *CLIHelmExecutor) Uninstall(ctx context.Context, options HelmUninstallOptions) error {
 	args := []string{
 		"uninstall",
@@ -176,6 +182,14 @@ func (e *CLIHelmExecutor) Uninstall(ctx context.Context, options HelmUninstallOp
 		return nil
 	}
 	return fmt.Errorf("helm delete failed for release %q in namespace %q: %s", options.ReleaseName, options.Namespace, helmOutputMessage(output, err))
+}
+
+func (e *CLIHelmExecutor) Rollback(ctx context.Context, options HelmRollbackOptions) error {
+	output, err := e.runCommand(ctx, "helm", "rollback", options.ReleaseName, "--namespace", options.Namespace)
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("helm rollback failed for release %q in namespace %q: %s", options.ReleaseName, options.Namespace, helmOutputMessage(output, err))
 }
 
 func (e *CLIHelmExecutor) DeleteNamespace(ctx context.Context, namespace string) error {
@@ -391,6 +405,9 @@ func (b *HelmDirectBackend) Status(ctx context.Context, environment domain.Envir
 	case "deployed":
 		return b.checkReleaseReady(ctx, namespace, releaseName, config)
 	case "pending-install", "pending-upgrade", "pending":
+		if err := b.helmExecutor.Rollback(ctx, HelmRollbackOptions{ReleaseName: releaseName, Namespace: namespace}); err != nil {
+			return domain.StatusFailed, fmt.Errorf("pending Helm release recovery failed: %w", err)
+		}
 		return domain.StatusCreating, nil
 	case "failed", "superseded", "uninstalled", "uninstalling", "unknown", "degraded":
 		return domain.StatusFailed, nil
