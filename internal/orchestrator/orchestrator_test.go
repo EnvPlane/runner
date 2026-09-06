@@ -1289,6 +1289,34 @@ func TestHelmDirectBackendStatusMapsHelmStates(t *testing.T) {
 	}
 }
 
+func TestHelmDirectBackendStatusUsesCustomReleaseNameForReadiness(t *testing.T) {
+	executor := &fakeHelmExecutor{
+		statusResult:    HelmStatus{Found: true, Status: "deployed"},
+		readinessResult: true,
+	}
+	backend := NewHelmDirectBackendWithExecutor(nil, executor)
+	environment := domain.Environment{ID: "pr-109", Project: "orders", Namespace: "envplane-pr-109"}
+	projectConfig := domain.ProjectConfig{Config: map[string]any{
+		"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{
+			"wait": true, "releaseNamePattern": "{{ .project.id }}-pr-{{ .environment.id }}",
+		}},
+	}}
+
+	status, err := backend.Status(context.Background(), environment, projectConfig)
+	if err != nil {
+		t.Fatalf("status: %v", err)
+	}
+	if status != domain.StatusReady {
+		t.Fatalf("status = %q, want ready", status)
+	}
+	if len(executor.statusCalls) != 1 || executor.statusCalls[0].Options.ReleaseName != "orders-pr-pr-109" {
+		t.Fatalf("status release name = %#v", executor.statusCalls)
+	}
+	if len(executor.readinessCalls) != 1 || executor.readinessCalls[0].Options.Release != "orders-pr-pr-109" {
+		t.Fatalf("readiness release name = %#v", executor.readinessCalls)
+	}
+}
+
 func TestFluxBackendStatusUsesFluxStatusAndResources(t *testing.T) {
 	backend := NewFluxBackend(nil)
 

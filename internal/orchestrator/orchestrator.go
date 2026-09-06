@@ -389,7 +389,7 @@ func (b *HelmDirectBackend) Status(ctx context.Context, environment domain.Envir
 	}
 	switch strings.ToLower(strings.TrimSpace(releaseStatus.Status)) {
 	case "deployed":
-		return b.checkReleaseReady(ctx, namespace, releaseStatus, environment, config)
+		return b.checkReleaseReady(ctx, namespace, releaseName, config)
 	case "pending-install", "pending-upgrade", "pending":
 		return domain.StatusCreating, nil
 	case "failed", "superseded", "uninstalled", "uninstalling", "unknown", "degraded":
@@ -399,23 +399,9 @@ func (b *HelmDirectBackend) Status(ctx context.Context, environment domain.Envir
 	}
 }
 
-func (b *HelmDirectBackend) checkReleaseReady(ctx context.Context, namespace string, status HelmStatus, environment domain.Environment, config helmDirectConfig) (domain.EnvironmentStatus, error) {
-	_ = status
+func (b *HelmDirectBackend) checkReleaseReady(ctx context.Context, namespace, releaseName string, config helmDirectConfig) (domain.EnvironmentStatus, error) {
 	if !config.wait {
 		return domain.StatusReady, nil
-	}
-	releaseName, err := b.renderReleaseName(environment, domain.ProjectConfig{
-		Config: map[string]any{
-			"deployment": map[string]any{
-				"backend": "helm_direct",
-				"helmDirect": map[string]any{
-					"wait": config.wait,
-				},
-			},
-		},
-	})
-	if err != nil {
-		return "", err
 	}
 	ready, err := b.helmExecutor.Readiness(ctx, HelmReadinessOptions{
 		Release:   releaseName,
