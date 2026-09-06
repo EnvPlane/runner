@@ -720,6 +720,33 @@ func TestRunnerHelmChartPreflightAllowsConfiguredHost(t *testing.T) {
 	}
 }
 
+func TestRunnerProjectConfigRejectsSecretFieldsOutsideAllowlist(t *testing.T) {
+	tests := []struct {
+		name   string
+		config map[string]any
+	}{
+		{
+			name:   "renamed manual value",
+			config: map[string]any{"deployment": map[string]any{"helmDirect": map[string]any{"manualValueV2": "secret"}}},
+		},
+		{
+			name:   "alternate separator",
+			config: map[string]any{"deployment": map[string]any{"helmDirect": map[string]any{"manual_secret_value": "secret"}}},
+		},
+		{
+			name:   "nested secret object",
+			config: map[string]any{"deployment": map[string]any{"helmDirect": map[string]any{"runtimeOptions": map[string]any{"token": "secret"}}}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := validateRunnerProjectConfig(test.config); err == nil {
+				t.Fatalf("configuration with unsupported secret field was accepted: %#v", test.config)
+			}
+		})
+	}
+}
+
 func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	config := projectConfigForRunnerCommand(domain.RunnerCommand{
 		ChartRef:     "oci://registry.example.com/charts/orders",

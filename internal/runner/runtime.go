@@ -966,9 +966,14 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 		result.Error = err.Error()
 		return result
 	}
-	if len(command.ProjectConfig.Sensitive) > 0 || strings.Contains(strings.ToLower(string(mustJSON(command.ProjectConfig.Config))), "manualvalue") {
+	if len(command.ProjectConfig.Sensitive) > 0 {
 		result.ErrorCode = "secret_materialization_boundary_violation"
 		result.Error = "RunnerCommand contains secret material"
+		return result
+	}
+	if err := validateRunnerProjectConfig(command.ProjectConfig.Config); err != nil {
+		result.ErrorCode = "secret_materialization_boundary_violation"
+		result.Error = "RunnerCommand contains unsupported project configuration: " + err.Error()
 		return result
 	}
 	projectConfig := projectConfigForRunnerCommand(command)
@@ -1195,12 +1200,58 @@ func appendUnique(values []string, value string) []string {
 	return append(values, value)
 }
 
-func mustJSON(value any) []byte {
-	payload, err := json.Marshal(value)
-	if err != nil {
-		return nil
+var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
+	"root": {
+		"deployment": {}, "bootstrapSessionData": {}, "secretMaterializationPlan": {},
+	},
+	"deployment": {
+		"backend": {}, "helmDirect": {}, "fluxcd": {}, "argocd": {},
+	},
+	"helmDirect": {
+		"namespaceMode": {}, "namespacePattern": {}, "releaseNamePattern": {},
+		"chartRef": {}, "chartVersion": {}, "timeout": {}, "wait": {},
+		"createNamespace": {}, "valuesOverrideStrategy": {}, "imageTagValuePath": {},
+	},
+	"fluxcd": {
+		"gitopsRepo": {}, "gitopsPath": {}, "fluxNamespace": {}, "sourceRefName": {},
+		"sourceRefNamespace": {}, "kustomizationName": {}, "commitMode": {},
+	},
+	"argocd": {
+		"serverUrl": {}, "credentialsSecretRef": {},
+	},
+	"secretMaterializationPlan": {
+		"planId": {}, "planDigest": {},
+	},
+	"bootstrapSessionData": {
+		"manifestTemplates": {},
+	},
+}
+
+func validateRunnerProjectConfig(config map[string]any) error {
+	return validateRunnerConfigMap("root", config)
+}
+
+func validateRunnerConfigMap(schema string, values map[string]any) error {
+	allowed, ok := runnerProjectConfigAllowedKeys[schema]
+	if !ok {
+		return fmt.Errorf("unsupported configuration schema %q", schema)
 	}
-	return payload
+	for key, value := range values {
+		if _, ok := allowed[key]; !ok {
+			return fmt.Errorf("field %q is not part of the runner project configuration contract", key)
+		}
+		switch key {
+		case "deployment", "helmDirect", "fluxcd", "argocd", "secretMaterializationPlan", "bootstrapSessionData":
+			nested, ok := value.(map[string]any)
+			if !ok {
+				return fmt.Errorf("field %q must be an object", key)
+			}
+			if err := validateRunnerConfigMap(key, nested); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // projectConfigForRunnerCommand keeps command fields and the compiled project
