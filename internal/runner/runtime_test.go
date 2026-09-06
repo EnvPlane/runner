@@ -674,7 +674,7 @@ func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 }
 
 func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
-	result := executeRunnerCommandWithBackend(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
+	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "status-target-cluster", Operation: "status",
 		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-42"},
 	}), fakeRunnerCommandBackend{status: domain.StatusReady})
@@ -684,7 +684,7 @@ func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 }
 
 func TestRunnerRendersReleasePlanDraftBeforeApply(t *testing.T) {
-	result := executeRunnerCommandWithBackend(context.Background(), domain.RunnerCommand{
+	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
 		ID: "render-plan", ProjectID: "checkout", Operation: "render_release_plan",
 		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
 	}, fakeRunnerCommandBackend{})
@@ -713,19 +713,32 @@ func TestReleasePlanResourcesDefaultsMissingManifestNamespace(t *testing.T) {
 func TestRunnerRejectsTamperedSignedReleasePlan(t *testing.T) {
 	command := runnerCommandWithReleasePlan(domain.RunnerCommand{ID: "tampered-plan", ProjectID: "checkout", Operation: "create", Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"}})
 	command.ReleasePlan.RenderedResources[0].Name = "foreign"
-	result := executeRunnerCommandWithBackend(context.Background(), command, fakeRunnerCommandBackend{})
+	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, command, fakeRunnerCommandBackend{})
 	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "verification failed") {
 		t.Fatalf("tampered release plan result = %#v", result)
 	}
 }
 
+func TestRunnerRejectsReleasePlanForForeignProjectIdentity(t *testing.T) {
+	command := runnerCommandWithReleasePlan(domain.RunnerCommand{
+		ID: "foreign-project-plan", ProjectID: "foreign", Operation: "create",
+		Environment: domain.Environment{ID: "feature", Project: "foreign", Namespace: "feature"},
+	})
+	cfg := runnerConfig{ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner"}
+	result := executeRunnerCommandWithBackend(context.Background(), cfg, command, fakeRunnerCommandBackend{})
+	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "identity mismatch") {
+		t.Fatalf("foreign project result = %#v", result)
+	}
+}
+
 func TestRunnerRejectsHelmCommandOutsideChartManagedNamespaceRBAC(t *testing.T) {
 	cfg := runnerConfig{
+		ProjectID:                  "checkout",
 		RunnerNamespace:            "envplane-system",
 		FeatureEnvWriterMode:       "generatedFeatureNamespaces",
 		FeatureEnvWriterNamespaces: []string{"envplane-e2e-feature"},
 	}
-	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), cfg, runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "forbidden-target", Operation: "create",
 		Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envplane-pr-201"},
 	}), fakeRunnerCommandBackend{}, cfg.canRunHelmInNamespace)
@@ -736,12 +749,13 @@ func TestRunnerRejectsHelmCommandOutsideChartManagedNamespaceRBAC(t *testing.T) 
 
 func TestRunnerAllowsHelmLifecycleOnlyInConfiguredTargetNamespace(t *testing.T) {
 	cfg := runnerConfig{
+		ProjectID:                  "checkout",
 		FeatureEnvWriterMode:       "preconfiguredNamespaces",
 		FeatureEnvWriterNamespaces: []string{"envplane-pr-201"},
 	}
 	for _, operation := range []string{"create", "recreate", "status", "delete", "force_cleanup"} {
 		t.Run(operation, func(t *testing.T) {
-			result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerCommandWithReleasePlan(domain.RunnerCommand{
+			result := executeRunnerCommandWithNamespaceGuard(context.Background(), cfg, runnerCommandWithReleasePlan(domain.RunnerCommand{
 				ID: "allowed-" + operation, Operation: operation,
 				Environment: domain.Environment{ID: "feature-201", Project: "checkout", Namespace: "envplane-pr-201"},
 			}), fakeRunnerCommandBackend{status: domain.StatusReady}, cfg.canRunHelmInNamespace)

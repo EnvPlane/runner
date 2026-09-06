@@ -924,7 +924,7 @@ func validateRunnerCommandAPIResponse(resp *http.Response) error {
 }
 
 func executeRunnerCommandForConfig(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand) domain.RunnerCommandResult {
-	return executeRunnerCommandWithNamespaceGuard(ctx, command, orchestrator.NewHelmDirectBackend(nil), cfg.canRunHelmInNamespace)
+	return executeRunnerCommandWithNamespaceGuard(ctx, cfg, command, orchestrator.NewHelmDirectBackend(nil), cfg.canRunHelmInNamespace)
 }
 
 type runnerCommandBackend interface {
@@ -932,8 +932,8 @@ type runnerCommandBackend interface {
 	DeploymentTarget(domain.Environment, domain.ProjectConfig) (string, string, error)
 }
 
-func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend) domain.RunnerCommandResult {
-	return executeRunnerCommandWithNamespaceGuard(ctx, command, backend, nil)
+func executeRunnerCommandWithBackend(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand, backend runnerCommandBackend) domain.RunnerCommandResult {
+	return executeRunnerCommandWithNamespaceGuard(ctx, cfg, command, backend, nil)
 }
 
 // executeRunnerCommandWithNamespaceGuard refuses an operation before invoking
@@ -941,9 +941,9 @@ func executeRunnerCommandWithBackend(ctx context.Context, command domain.RunnerC
 // exact resolved release namespace. This prevents the late, misleading Helm
 // failure "cannot list secrets" and never delegates to a control-plane
 // kubeconfig.
-func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.RunnerCommand, backend runnerCommandBackend, namespaceAllowed func(string) bool) domain.RunnerCommandResult {
+func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand, backend runnerCommandBackend, namespaceAllowed func(string) bool) domain.RunnerCommandResult {
 	result := domain.RunnerCommandResult{CommandID: command.ID, Status: "failed", Namespace: command.Environment.Namespace, ReleaseName: command.Environment.ID}
-	if err := validateReleasePlanCommand(command); err != nil {
+	if err := validateReleasePlanCommand(command, cfg); err != nil {
 		result.ErrorCode = "release_plan_required"
 		result.Error = err.Error()
 		return result
@@ -959,7 +959,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 		if tenantID == "" {
 			tenantID = domain.DefaultTenantID
 		}
-		if err := domain.ValidateCleanupInventory(command.CleanupInventory, tenantID, command.ProjectID, command.Environment.Namespace); err != nil {
+		if err := domain.ValidateCleanupInventory(command.CleanupInventory, tenantID, cfg.ProjectID, command.Environment.Namespace); err != nil {
 			result.ErrorCode = "cleanup_ownership_violation"
 			result.Error = err.Error()
 			return result
@@ -1063,7 +1063,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, command domain.
 	return result
 }
 
-func validateReleasePlanCommand(command domain.RunnerCommand) error {
+func validateReleasePlanCommand(command domain.RunnerCommand, cfg runnerConfig) error {
 	switch command.Operation {
 	case "create", "recreate", "delete", "force_cleanup", "status":
 	default:
@@ -1099,7 +1099,7 @@ func validateReleasePlanCommand(command domain.RunnerCommand) error {
 		kinds = appendUnique(kinds, resource.Kind)
 	}
 	ref := domain.ReleasePlanTransportReference{PlanID: command.ReleasePlanID, PlanDigest: command.ReleasePlanDigest, TemplateDigest: command.ReleasePlan.TemplateDigest, InputDigest: command.ReleasePlan.InputDigest, Signature: command.ReleasePlanSignature, KeyID: command.ReleasePlanKeyID}
-	if err := domain.VerifyReleasePlanReference(*command.ReleasePlan, ref, publicKey, domain.ReleasePlanRunnerIdentity{TenantID: tenantID, ProjectID: command.ProjectID, ClusterID: command.ClusterID, RunnerID: command.RunnerID}, namespaces, kinds); err != nil {
+	if err := domain.VerifyReleasePlanReference(*command.ReleasePlan, ref, publicKey, domain.ReleasePlanRunnerIdentity{TenantID: tenantID, ProjectID: cfg.ProjectID, ClusterID: cfg.ClusterID, RunnerID: cfg.RunnerID}, namespaces, kinds); err != nil {
 		return fmt.Errorf("release plan verification failed: %w", err)
 	}
 	return nil
