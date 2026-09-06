@@ -29,6 +29,10 @@ type fakeRunnerCommandBackend struct {
 }
 
 func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCommand {
+	return runnerCommandWithReleasePlanResource(command, command.Environment.Namespace, "HelmDirect")
+}
+
+func runnerCommandWithReleasePlanResource(command domain.RunnerCommand, resourceNamespace, resourceKind string) domain.RunnerCommand {
 	tenantID := command.Environment.TenantID
 	if tenantID == "" {
 		tenantID = domain.DefaultTenantID
@@ -37,7 +41,7 @@ func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCom
 	if command.ProjectID == "" {
 		command.ProjectID = command.Environment.Project
 	}
-	resource := domain.RenderedResource{ResourceID: "HelmDirect/" + command.Environment.Namespace + "/" + command.Environment.ID, Kind: "HelmDirect", Namespace: command.Environment.Namespace, Name: command.Environment.ID, Manifest: map[string]any{"apiVersion": "envplane.io/v1", "kind": "HelmDirect", "metadata": map[string]any{"name": command.Environment.ID, "namespace": command.Environment.Namespace}}, Digest: "sha256:resource"}
+	resource := domain.RenderedResource{ResourceID: resourceKind + "/" + resourceNamespace + "/" + command.Environment.ID, Kind: resourceKind, Namespace: resourceNamespace, Name: command.Environment.ID, Manifest: map[string]any{"apiVersion": "envplane.io/v1", "kind": resourceKind, "metadata": map[string]any{"name": command.Environment.ID, "namespace": resourceNamespace}}, Digest: "sha256:resource"}
 	executionInputDigest, _ := domain.ReleasePlanExecutionInputDigest(command.Environment, command.ProjectConfig, command.ChartRef, command.ChartVersion, command.ProjectConfigVersion)
 	plan := domain.EnvironmentReleasePlan{ContractVersion: domain.EnvironmentTemplateContractVersion, PlanID: "release-plan-test", TenantID: tenantID, ProjectID: command.ProjectID, EnvironmentID: command.Environment.ID, TemplateRevisionID: "revision-test", TemplateDigest: "sha256:template", Backend: domain.DeploymentBackendHelmDirect, Ownership: []domain.OwnershipRecord{{Kind: resource.Kind, Namespace: resource.Namespace, Name: resource.Name}}, RenderedResources: []domain.RenderedResource{resource}, InputDigest: "sha256:input", ExecutionInputDigest: executionInputDigest}
 	plan.Digest, _ = plan.CanonicalDigest()
@@ -53,6 +57,18 @@ func runnerCommandWithReleasePlan(command domain.RunnerCommand) domain.RunnerCom
 	command.ChartRef = ""
 	command.ChartVersion = ""
 	return command
+}
+
+func TestRunnerRejectsReleasePlanResourceOutsideIndependentInventoryGuard(t *testing.T) {
+	command := runnerCommandWithReleasePlanResource(domain.RunnerCommand{
+		ID: "foreign-inventory", ProjectID: "checkout", Operation: "create",
+		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "allowed-ns"},
+	}, "foreign-ns", "Deployment")
+	cfg := runnerConfig{ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner"}
+	result := executeRunnerCommandWithBackend(context.Background(), cfg, command, fakeRunnerCommandBackend{})
+	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "outside exact inventory guard") {
+		t.Fatalf("foreign inventory result = %#v", result)
+	}
 }
 
 func (b fakeRunnerCommandBackend) Render(context.Context, domain.Environment, domain.ProjectConfig) ([]orchestrator.Manifest, error) {

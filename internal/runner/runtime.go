@@ -63,6 +63,7 @@ type runnerConfig struct {
 	FeatureEnvWriterMode                 string
 	FeatureEnvWriterNamespaces           []string
 	HelmAllowedChartHosts                []string
+	ReleasePlanAllowedKinds              []string
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -107,6 +108,7 @@ func runnerConfigFromEnv() runnerConfig {
 		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPLANE_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
 		FeatureEnvWriterNamespaces:           normalizeRunnerNamespaceList(getenv("ENVPLANE_FEATURE_ENV_WRITER_NAMESPACES", "")),
 		HelmAllowedChartHosts:                normalizeRunnerHostList(getenv("ENVPLANE_HELM_ALLOWED_CHART_HOSTS", "")),
+		ReleasePlanAllowedKinds:              normalizeRunnerKindList(getenv("ENVPLANE_RELEASE_PLAN_ALLOWED_KINDS", "")),
 	}
 	cfg.EnvDiagnostics = legacyDiagnostics()
 	return cfg
@@ -127,6 +129,35 @@ func normalizeRunnerNamespaceList(raw string) []string {
 		items = append(items, namespace)
 	}
 	return items
+}
+
+func normalizeRunnerKindList(raw string) []string {
+	seen := map[string]struct{}{}
+	items := make([]string, 0)
+	for _, value := range strings.Split(raw, ",") {
+		kind := strings.TrimSpace(value)
+		if kind == "" {
+			continue
+		}
+		if _, exists := seen[kind]; exists {
+			continue
+		}
+		seen[kind] = struct{}{}
+		items = append(items, kind)
+	}
+	return items
+}
+
+func (c runnerConfig) releasePlanAllowedKinds() []string {
+	if len(c.ReleasePlanAllowedKinds) > 0 {
+		return append([]string(nil), c.ReleasePlanAllowedKinds...)
+	}
+	return []string{
+		"ConfigMap", "CronJob", "CustomResourceDefinition", "DaemonSet", "Deployment",
+		"HelmDirect", "Ingress", "Job", "Kustomization", "Namespace", "NetworkPolicy",
+		"PersistentVolumeClaim", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount",
+		"StatefulSet", "GitRepository",
+	}
 }
 
 func normalizeRunnerHostList(raw string) []string {
@@ -1115,12 +1146,12 @@ func validateReleasePlanCommand(command domain.RunnerCommand, cfg runnerConfig) 
 	if tenantID == "" {
 		tenantID = domain.DefaultTenantID
 	}
-	namespaces := make([]string, 0, len(command.ReleasePlan.RenderedResources))
-	kinds := make([]string, 0, len(command.ReleasePlan.RenderedResources))
-	for _, resource := range command.ReleasePlan.RenderedResources {
-		namespaces = appendUnique(namespaces, resource.Namespace)
-		kinds = appendUnique(kinds, resource.Kind)
+	namespace := strings.TrimSpace(command.Environment.Namespace)
+	if namespace == "" {
+		return fmt.Errorf("release plan target namespace is required")
 	}
+	namespaces := []string{namespace}
+	kinds := cfg.releasePlanAllowedKinds()
 	ref := domain.ReleasePlanTransportReference{PlanID: command.ReleasePlanID, PlanDigest: command.ReleasePlanDigest, TemplateDigest: command.ReleasePlan.TemplateDigest, InputDigest: command.ReleasePlan.InputDigest, Signature: command.ReleasePlanSignature, KeyID: command.ReleasePlanKeyID}
 	if err := domain.VerifyReleasePlanReference(*command.ReleasePlan, ref, publicKey, domain.ReleasePlanRunnerIdentity{TenantID: tenantID, ProjectID: cfg.ProjectID, ClusterID: cfg.ClusterID, RunnerID: cfg.RunnerID}, namespaces, kinds); err != nil {
 		return fmt.Errorf("release plan verification failed: %w", err)
@@ -1189,15 +1220,6 @@ func manifestString(values map[string]any, key string) string {
 		return ""
 	}
 	return strings.TrimSpace(fmt.Sprint(value))
-}
-
-func appendUnique(values []string, value string) []string {
-	for _, current := range values {
-		if current == value {
-			return values
-		}
-	}
-	return append(values, value)
 }
 
 var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
