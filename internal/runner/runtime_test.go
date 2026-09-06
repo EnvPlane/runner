@@ -656,6 +656,41 @@ func TestValidateRunnerHelmChartOmitsVersionForDirectArchive(t *testing.T) {
 	}
 }
 
+func TestValidateRunnerHelmChartUsesCanonicalReferenceValidation(t *testing.T) {
+	for _, chartRef := range []string{";", "&", "`", "$()", "oci://", "https://", "oci://registry.example.com/"} {
+		t.Run(chartRef, func(t *testing.T) {
+			if domain.IsSafeHelmChartRef(chartRef) {
+				t.Fatalf("test input %q must be rejected by the canonical validator", chartRef)
+			}
+			runCalled := false
+			err := validateRunnerHelmChartWithCommand(context.Background(), chartRef, "", func(_ context.Context, _ ...string) ([]byte, error) {
+				runCalled = true
+				return nil, nil
+			})
+			if err == nil || !strings.Contains(err.Error(), "invalid chart reference") || runCalled {
+				t.Fatalf("preflight result for %q = err %v, runCalled=%v", chartRef, err, runCalled)
+			}
+		})
+	}
+}
+
+func TestRunnerPreflightAndHelmExecutorRejectSameChartReferences(t *testing.T) {
+	for _, chartRef := range []string{";", "&", "`", "$()", "oci://", "https://", "oci://registry.example.com/"} {
+		t.Run(chartRef, func(t *testing.T) {
+			preflightErr := validateRunnerHelmChartWithCommand(context.Background(), chartRef, "", func(_ context.Context, _ ...string) ([]byte, error) {
+				t.Fatal("preflight must reject the chart reference before invoking Helm")
+				return nil, nil
+			})
+			deployErr := orchestrator.NewCLIHelmExecutor().UpgradeInstall(context.Background(), orchestrator.HelmUpgradeOptions{
+				ReleaseName: "release", ChartRef: chartRef, Namespace: "feature",
+			})
+			if preflightErr == nil || deployErr == nil {
+				t.Fatalf("chart reference %q: preflightErr=%v deployErr=%v", chartRef, preflightErr, deployErr)
+			}
+		})
+	}
+}
+
 func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	config := projectConfigForRunnerCommand(domain.RunnerCommand{
 		ChartRef:     "oci://registry.example.com/charts/orders",

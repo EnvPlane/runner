@@ -24,7 +24,6 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
-	"unicode"
 
 	"github.com/envplane/contracts/domain"
 	"github.com/envplane/runner/internal/orchestrator"
@@ -1229,7 +1228,7 @@ func validateRunnerHelmChart(ctx context.Context, chartRef, chartVersion string)
 
 func validateRunnerHelmChartWithCommand(ctx context.Context, chartRef, chartVersion string, run func(context.Context, ...string) ([]byte, error)) error {
 	chartRef = strings.TrimSpace(chartRef)
-	if !validRunnerHelmChartRef(chartRef) {
+	if !domain.IsSafeHelmChartRef(chartRef) {
 		return fmt.Errorf("invalid chart reference")
 	}
 	args := []string{"show", "chart", chartRef}
@@ -1249,18 +1248,6 @@ func isDirectRunnerHelmChartArchive(chartRef string) bool {
 		return false
 	}
 	return strings.HasSuffix(strings.ToLower(parsed.Path), ".tgz")
-}
-
-func validRunnerHelmChartRef(chartRef string) bool {
-	chartRef = strings.TrimSpace(chartRef)
-	if chartRef == "" || strings.HasPrefix(chartRef, "-") || strings.HasPrefix(chartRef, "deploy/helm/") || strings.HasPrefix(chartRef, "./") || strings.HasPrefix(chartRef, "../") || strings.IndexFunc(chartRef, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
-		return false
-	}
-	if strings.HasPrefix(chartRef, "oci://") || strings.HasPrefix(chartRef, "https://") || strings.HasPrefix(chartRef, "http://") {
-		return true
-	}
-	parts := strings.Split(chartRef, "/")
-	return len(parts) == 2 && strings.TrimSpace(parts[0]) != "" && strings.TrimSpace(parts[1]) != ""
 }
 
 func classifyHelmChartPreflightError(err error) (string, string) {
