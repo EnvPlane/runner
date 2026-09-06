@@ -95,7 +95,7 @@ func (s *SQLStore) Save(environment domain.Environment) error {
 		return err
 	}
 
-	_, err = s.db.Exec(`
+	result, err := s.db.Exec(`
 INSERT INTO environments (id, project_id, pr_id, branch, commit_sha, status, type, ttl, payload, created_at, updated_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11)
 ON CONFLICT (id) DO UPDATE SET
@@ -107,11 +107,25 @@ ON CONFLICT (id) DO UPDATE SET
 	type = EXCLUDED.type,
 	ttl = EXCLUDED.ttl,
 	payload = EXCLUDED.payload,
-	updated_at = EXCLUDED.updated_at`,
+	updated_at = EXCLUDED.updated_at
+WHERE EXCLUDED.updated_at > environments.updated_at`,
 		record.ID, record.ProjectID, record.PRID, record.Branch, record.CommitSHA,
 		record.Status, record.Type, record.TTL, string(payload), record.CreatedAt, record.UpdatedAt)
 	if err != nil {
 		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		var exists bool
+		if err := s.db.QueryRow(`SELECT EXISTS (SELECT 1 FROM environments WHERE id = $1)`, record.ID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return ErrConflict
+		}
 	}
 	return nil
 }

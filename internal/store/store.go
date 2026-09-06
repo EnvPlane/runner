@@ -20,6 +20,7 @@ var ErrBootstrapTokenAlreadyUsed = errors.New("bootstrap token already used")
 var ErrBootstrapTokenInvalid = errors.New("invalid bootstrap token")
 var ErrBootstrapTokenExpired = errors.New("bootstrap token expired")
 var ErrBootstrapIdentityMismatch = errors.New("bootstrap identity mismatch")
+var ErrConflict = errors.New("environment state conflict")
 
 type EnvironmentStore interface {
 	List() ([]domain.Environment, error)
@@ -124,7 +125,13 @@ func (s *JSONStore) Save(environment domain.Environment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.data[environment.ID] = NewEnvironmentRecord(environment)
+	record := NewEnvironmentRecord(environment)
+	if existing, ok := s.data[environment.ID]; ok {
+		if record.UpdatedAt.IsZero() || !record.UpdatedAt.After(existing.UpdatedAt) {
+			return ErrConflict
+		}
+	}
+	s.data[environment.ID] = record
 	return s.persistLocked()
 }
 

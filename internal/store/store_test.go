@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -76,6 +77,31 @@ func TestJSONStorePersistsEnvironments(t *testing.T) {
 	}
 	if record.CreatedAt.IsZero() {
 		t.Fatal("created_at is zero")
+	}
+}
+
+func TestJSONStoreRejectsOlderEnvironmentState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "environments.json")
+	store, err := NewJSONStore(path)
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	newer := domain.Environment{ID: "env-1", Status: domain.StatusReady, UpdatedAt: time.Unix(20, 0).UTC()}
+	if err := store.Save(newer); err != nil {
+		t.Fatalf("save newer state: %v", err)
+	}
+	older := newer
+	older.Status = domain.StatusCreating
+	older.UpdatedAt = time.Unix(10, 0).UTC()
+	if err := store.Save(older); !errors.Is(err, ErrConflict) {
+		t.Fatalf("save older state error = %v, want ErrConflict", err)
+	}
+	got, err := store.Get("env-1")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	if got.Status != domain.StatusReady || !got.UpdatedAt.Equal(newer.UpdatedAt) {
+		t.Fatalf("stored state = %#v, want newer state", got)
 	}
 }
 

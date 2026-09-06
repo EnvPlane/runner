@@ -93,6 +93,33 @@ func TestSQLStoreCRUD(t *testing.T) {
 	}
 }
 
+func TestSQLStoreRejectsOlderEnvironmentState(t *testing.T) {
+	db, closeDB := setupSQLStoreIntegrationDB(t)
+	defer closeDB()
+	if _, err := db.Exec(`TRUNCATE TABLE environments`); err != nil {
+		t.Fatalf("truncate environments: %v", err)
+	}
+
+	store := NewSQLStore(db)
+	newer := domain.Environment{ID: "sql-cas-1", Project: "cms", Status: domain.StatusReady, UpdatedAt: time.Unix(20, 0).UTC()}
+	if err := store.Save(newer); err != nil {
+		t.Fatalf("save newer state: %v", err)
+	}
+	older := newer
+	older.Status = domain.StatusCreating
+	older.UpdatedAt = time.Unix(10, 0).UTC()
+	if err := store.Save(older); !errors.Is(err, ErrConflict) {
+		t.Fatalf("save older state error = %v, want ErrConflict", err)
+	}
+	got, err := store.Get("sql-cas-1")
+	if err != nil {
+		t.Fatalf("get environment: %v", err)
+	}
+	if got.Status != domain.StatusReady || !got.UpdatedAt.Equal(newer.UpdatedAt) {
+		t.Fatalf("stored state = %#v, want newer state", got)
+	}
+}
+
 func TestSQLStoreListSortsByCreatedAtDesc(t *testing.T) {
 	db, closeDB := setupSQLStoreIntegrationDB(t)
 	defer closeDB()
