@@ -1261,7 +1261,7 @@ var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
 		"planId": {}, "planDigest": {},
 	},
 	"bootstrapSessionData": {
-		"manifestTemplates": {},
+		"manifestTemplates": {}, "manifestTemplatesSourceFingerprint": {},
 	},
 }
 

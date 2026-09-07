@@ -796,6 +796,17 @@ func TestRunnerProjectConfigRejectsSecretFieldsOutsideAllowlist(t *testing.T) {
 	}
 }
 
+func TestRunnerProjectConfigAcceptsManifestTemplateSourceFingerprint(t *testing.T) {
+	config := map[string]any{
+		"bootstrapSessionData": map[string]any{
+			"manifestTemplatesSourceFingerprint": "sha256:source",
+		},
+	}
+	if err := validateRunnerProjectConfig(config); err != nil {
+		t.Fatalf("manifest template source fingerprint was rejected: %v", err)
+	}
+}
+
 func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	config := projectConfigForRunnerCommand(domain.RunnerCommand{
 		ChartRef:     "oci://registry.example.com/charts/orders",
