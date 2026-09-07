@@ -835,6 +835,22 @@ func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 	}
 }
 
+func TestRunnerDeleteAcceptsReleasePlanAfterHelmTargetIsReported(t *testing.T) {
+	command := runnerCommandWithReleasePlan(domain.RunnerCommand{
+		ID: "delete-resolved-target", ProjectID: "checkout", Operation: "delete",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-42"},
+	})
+	// The control plane records these result fields after a successful create.
+	// They are runtime observations and must not invalidate the signed plan.
+	command.Environment.TargetNamespace = "envplane-pr-42"
+	command.Environment.HelmReleaseName = "checkout-feature-42"
+
+	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, command, fakeRunnerCommandBackend{})
+	if result.Status != "succeeded" || !result.CleanupVerified {
+		t.Fatalf("delete result = %#v", result)
+	}
+}
+
 func TestRunnerRendersReleasePlanDraftBeforeApply(t *testing.T) {
 	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
 		ID: "render-plan", ProjectID: "checkout", Operation: "render_release_plan",
