@@ -154,7 +154,7 @@ func (c runnerConfig) releasePlanAllowedKinds() []string {
 	}
 	return []string{
 		"ConfigMap", "CronJob", "CustomResourceDefinition", "DaemonSet", "Deployment",
-		"HelmDirect", "Ingress", "Job", "Kustomization", "Namespace", "NetworkPolicy",
+		"HelmDirect", "HelmDirectDeployment", "Ingress", "Job", "Kustomization", "Namespace", "NetworkPolicy",
 		"PersistentVolumeClaim", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount",
 		"StatefulSet", "GitRepository",
 	}
