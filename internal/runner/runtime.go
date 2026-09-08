@@ -1124,13 +1124,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 }
 
 func runnerHelmChartRef(command domain.RunnerCommand, projectConfig domain.ProjectConfig) string {
-	if chartRef := strings.TrimSpace(command.ChartRef); chartRef != "" {
-		return chartRef
-	}
-	deployment, _ := projectConfig.Config["deployment"].(map[string]any)
-	helmDirect, _ := deployment["helmDirect"].(map[string]any)
-	chartRef, _ := helmDirect["chartRef"].(string)
-	return strings.TrimSpace(chartRef)
+	return orchestrator.HelmDirectChartReference(command.Environment, projectConfig)
 }
 
 func validateReleasePlanCommand(command domain.RunnerCommand, cfg runnerConfig) error {

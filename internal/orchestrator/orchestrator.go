@@ -659,6 +659,18 @@ func (b *HelmDirectBackend) chartPath(environment domain.Environment) string {
 }
 
 func (b *HelmDirectBackend) chartRef(environment domain.Environment, config helmDirectConfig) string {
+	return helmDirectChartReference(environment, config)
+}
+
+// HelmDirectChartReference returns the chart reference that Helm Direct uses
+// for a project configuration. GitOps.Path is a local chart path or repository
+// alias when it is not an OCI/HTTP(S) URL; URL-shaped values are still subject
+// to the runner's chart-host allowlist before execution.
+func HelmDirectChartReference(environment domain.Environment, projectConfig domain.ProjectConfig) string {
+	return helmDirectChartReference(environment, resolveHelmDirectConfig(projectConfig))
+}
+
+func helmDirectChartReference(environment domain.Environment, config helmDirectConfig) string {
 	if ref := strings.TrimSpace(config.chartRef); ref != "" {
 		return ref
 	}

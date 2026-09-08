@@ -104,6 +104,42 @@ func TestRunnerRejectsUnallowlistedHelmChartBeforeApply(t *testing.T) {
 	}
 }
 
+func TestRunnerRejectsUnallowlistedLegacyEnvironmentChartBeforeApply(t *testing.T) {
+	for _, operation := range []string{"create", "recreate"} {
+		t.Run(operation, func(t *testing.T) {
+			command := runnerCommandWithReleasePlan(domain.RunnerCommand{
+				ID: operation + "-unallowlisted-legacy-chart", ProjectID: "checkout", Operation: operation,
+				Environment: domain.Environment{
+					ID: "feature", Project: "checkout", Namespace: "feature",
+					Charts: domain.ChartVersions{App: "oci://evil.example/charts/app"},
+				},
+				ProjectConfig: domain.ProjectConfig{Config: map[string]any{
+					"deployment": map[string]any{"backend": "helm_direct", "helmDirect": map[string]any{}},
+				}},
+			})
+			backend := &recordingRunnerCommandBackend{}
+			result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{
+				ProjectID: "checkout", HelmAllowedChartHosts: []string{"registry.example"},
+			}, command, backend)
+			if result.ErrorCode != "helm_chart_host_not_allowlisted" || backend.applyCalls != 0 {
+				t.Fatalf("result=%#v applyCalls=%d", result, backend.applyCalls)
+			}
+		})
+	}
+}
+
+func TestRunnerRejectsReleasePlanResourceWithDisallowedKind(t *testing.T) {
+	command := runnerCommandWithReleasePlanResource(domain.RunnerCommand{
+		ID: "foreign-kind", ProjectID: "checkout", Operation: "create",
+		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
+	}, "feature", "ClusterRole")
+	cfg := runnerConfig{ProjectID: "checkout", ClusterID: "dev-us", RunnerID: "checkout-runner"}
+	result := executeRunnerCommandWithBackend(context.Background(), cfg, command, fakeRunnerCommandBackend{})
+	if result.ErrorCode != "release_plan_required" || !strings.Contains(result.Error, "outside exact inventory guard") {
+		t.Fatalf("foreign kind result = %#v", result)
+	}
+}
+
 func (b fakeRunnerCommandBackend) Render(context.Context, domain.Environment, domain.ProjectConfig) ([]orchestrator.Manifest, error) {
 	return []orchestrator.Manifest{{Path: "release.yaml", Kind: "HelmDirect", Content: []byte("apiVersion: envplane.io/v1\nkind: HelmDirect\nmetadata:\n  name: release\n  namespace: feature\n")}}, nil
 }
