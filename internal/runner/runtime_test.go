@@ -874,10 +874,10 @@ func TestExecuteRunnerStatusReportsTargetClusterLifecycle(t *testing.T) {
 func TestRunnerDeleteAcceptsReleasePlanAfterHelmTargetIsReported(t *testing.T) {
 	command := runnerCommandWithReleasePlan(domain.RunnerCommand{
 		ID: "delete-resolved-target", ProjectID: "checkout", Operation: "delete",
-		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-42"},
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-42", TargetNamespace: "envplane-pr-42"},
 	})
-	// The control plane records these result fields after a successful create.
-	// They are runtime observations and must not invalidate the signed plan.
+	// The control plane records the release name after a successful create;
+	// target namespace is deployment-relevant and is signed in the plan.
 	command.Environment.TargetNamespace = "envplane-pr-42"
 	command.Environment.HelmReleaseName = "checkout-feature-42"
 
