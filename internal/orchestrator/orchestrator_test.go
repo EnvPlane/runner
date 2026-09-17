@@ -1058,6 +1058,22 @@ func TestHelmDirectBackendDeleteSkipsUnmanagedNamespace(t *testing.T) {
 	}
 }
 
+func TestNamespaceOwnedByEnvironmentAcceptsCanonicalSameClusterPreview(t *testing.T) {
+	labels := map[string]string{
+		"envplane.io/managed-by": "same-cluster-project-reconciler",
+		"envplane.io/project-id": "project-251",
+	}
+	if !namespaceOwnedByEnvironment(labels, "envplane-pr-preview-251", "project-251", "preview-251") {
+		t.Fatal("expected canonical project-scoped preview namespace to be deletable")
+	}
+	if namespaceOwnedByEnvironment(labels, "other-namespace", "project-251", "preview-251") {
+		t.Fatal("project-scoped labels must not authorize a non-canonical namespace")
+	}
+	if namespaceOwnedByEnvironment(labels, "envplane-pr-preview-251", "other-project", "preview-251") {
+		t.Fatal("project-scoped labels must not authorize a different project")
+	}
+}
+
 func TestHelmDirectBackendDeleteSkipsSharedNamespaceDeletion(t *testing.T) {
 	executor := &fakeHelmExecutor{}
 	backend := NewHelmDirectBackendWithExecutor(nil, executor)

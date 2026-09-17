@@ -255,16 +255,28 @@ func (e *CLIHelmExecutor) IsNamespaceManaged(ctx context.Context, namespace, pro
 	}
 	projectID = strings.TrimSpace(projectID)
 	environmentID = strings.TrimSpace(environmentID)
-	managedOK := strings.TrimSpace(labels["envplane.io/managed"]) == "true"
-	projectOK := true
-	environmentOK := true
-	if projectID != "" {
-		projectOK = strings.TrimSpace(labels["envplane.io/project-id"]) == projectID
+	return namespaceOwnedByEnvironment(labels, namespace, projectID, environmentID), nil
+}
+
+// namespaceOwnedByEnvironment accepts the current Helm-managed namespace
+// labels and the earlier project-scoped reconciler labels. The fallback is
+// deliberately constrained to the canonical dedicated preview namespace so a
+// project label alone can never authorize deleting an arbitrary namespace.
+func namespaceOwnedByEnvironment(labels map[string]string, namespace, projectID, environmentID string) bool {
+	if labels == nil {
+		return false
 	}
-	if environmentID != "" {
-		environmentOK = strings.TrimSpace(labels["envplane.io/environment-id"]) == environmentID
+	projectID = strings.TrimSpace(projectID)
+	environmentID = strings.TrimSpace(environmentID)
+	projectMatches := projectID == "" || strings.TrimSpace(labels["envplane.io/project-id"]) == projectID
+	environmentMatches := environmentID == "" || strings.TrimSpace(labels["envplane.io/environment-id"]) == environmentID
+	if strings.TrimSpace(labels["envplane.io/managed"]) == "true" {
+		return projectMatches && environmentMatches
 	}
-	return managedOK && projectOK && environmentOK, nil
+	if strings.TrimSpace(labels["envplane.io/managed-by"]) != "same-cluster-project-reconciler" || !projectMatches || environmentID == "" {
+		return false
+	}
+	return strings.TrimSpace(namespace) == "envplane-pr-"+environmentID
 }
 
 type kubernetesPodList struct {
