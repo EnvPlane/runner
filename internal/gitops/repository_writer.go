@@ -213,10 +213,14 @@ func (w *RepositoryWriter) prepare(ctx context.Context) error {
 			return err
 		}
 	} else {
-		if err := runGit(ctx, w.target.Workspace, "checkout", w.target.Branch); err != nil {
+		// A RepositoryWriter workspace is an operation cache, never a source of
+		// user-authored GitOps changes.  A previous interrupted operation can leave
+		// generated files dirty.  Reset it to the fetched branch before writing so a
+		// later delete is not blocked by an unrelated local merge conflict.
+		if err := runGit(ctx, w.target.Workspace, "checkout", "-f", w.target.Branch); err != nil {
 			return err
 		}
-		if err := runGitWithSecret(ctx, w.target.Workspace, w.target.SecretValue, "pull", "--ff-only", "origin", w.target.Branch); err != nil {
+		if err := runGit(ctx, w.target.Workspace, "reset", "--hard", "origin/"+w.target.Branch); err != nil {
 			return err
 		}
 	}

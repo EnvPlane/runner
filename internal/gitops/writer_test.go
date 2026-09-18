@@ -151,6 +151,59 @@ func TestRepositoryWriterClonesWritesSubdirAndPushes(t *testing.T) {
 	}
 }
 
+func TestRepositoryWriterDiscardsInterruptedWorkspaceChangesBeforeUpdatingMain(t *testing.T) {
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	run(t, "", "git", "init", "--bare", remote)
+	seed := initRepo(t)
+	if err := os.MkdirAll(filepath.Join(seed, "clusters", "local"), 0o755); err != nil {
+		t.Fatalf("mkdir seed: %v", err)
+	}
+	tracked := filepath.Join(seed, "clusters", "local", "kustomization.yaml")
+	if err := os.WriteFile(tracked, []byte("resources: []\n"), 0o644); err != nil {
+		t.Fatalf("write seed: %v", err)
+	}
+	run(t, seed, "git", "add", ".")
+	run(t, seed, "git", "-c", "user.name=seed", "-c", "user.email=seed@example.com", "commit", "-m", "seed")
+	run(t, seed, "git", "remote", "add", "origin", remote)
+	run(t, seed, "git", "push", "origin", "main")
+
+	workspace := filepath.Join(t.TempDir(), "workspace")
+	initial, err := NewRepositoryWriter(RepositoryTarget{URL: remote, Branch: "main", Path: "clusters/local", Workspace: workspace})
+	if err != nil {
+		t.Fatalf("new initial writer: %v", err)
+	}
+	if _, err := initial.WriteManifest(context.Background(), "initial.yaml", []byte("initial\n"), "initial"); err != nil {
+		t.Fatalf("initial write: %v", err)
+	}
+
+	upstream := filepath.Join(t.TempDir(), "upstream")
+	run(t, "", "git", "clone", "--branch", "main", remote, upstream)
+	if err := os.WriteFile(filepath.Join(upstream, "clusters", "local", "kustomization.yaml"), []byte("resources:\n  - remote.yaml\n"), 0o644); err != nil {
+		t.Fatalf("write upstream: %v", err)
+	}
+	run(t, upstream, "git", "add", ".")
+	run(t, upstream, "git", "-c", "user.name=upstream", "-c", "user.email=upstream@example.com", "commit", "-m", "remote update")
+	run(t, upstream, "git", "push", "origin", "main")
+
+	if err := os.WriteFile(filepath.Join(workspace, "clusters", "local", "kustomization.yaml"), []byte("resources:\n  - interrupted.yaml\n"), 0o644); err != nil {
+		t.Fatalf("dirty workspace: %v", err)
+	}
+	retry, err := NewRepositoryWriter(RepositoryTarget{URL: remote, Branch: "main", Path: "clusters/local", Workspace: workspace})
+	if err != nil {
+		t.Fatalf("new retry writer: %v", err)
+	}
+	if _, err := retry.WriteManifest(context.Background(), "retry.yaml", []byte("retry\n"), "retry"); err != nil {
+		t.Fatalf("retry write with dirty workspace: %v", err)
+	}
+	content, err := os.ReadFile(filepath.Join(workspace, "clusters", "local", "kustomization.yaml"))
+	if err != nil {
+		t.Fatalf("read refreshed tracked file: %v", err)
+	}
+	if got, want := string(content), "resources:\n  - remote.yaml\n"; got != want {
+		t.Fatalf("workspace retained interrupted content: got %q want %q", got, want)
+	}
+}
+
 func TestRepositoryWriterRejectsOptionLikeGitTargets(t *testing.T) {
 	tests := []struct {
 		name   string
