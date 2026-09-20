@@ -1037,11 +1037,9 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 			result.Error = err.Error()
 			return result
 		}
-		if namespaceAllowed != nil && !namespaceAllowed(result.Namespace) {
-			result.ErrorCode = "runner_namespace_access_denied"
-			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
-			return result
-		}
+		// Rendering only produces an authenticated release-plan draft; it does
+		// not access Helm release storage. A terminated recreate relies on this
+		// phase to restore the namespace-scoped RBAC before a later apply.
 		manifests, renderErr := backend.Render(ctx, command.Environment, projectConfig)
 		if renderErr != nil {
 			result.ErrorCode = "release_plan_render_failed"

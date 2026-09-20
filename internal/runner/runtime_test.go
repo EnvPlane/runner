@@ -901,6 +901,16 @@ func TestRunnerRendersReleasePlanDraftBeforeApply(t *testing.T) {
 	}
 }
 
+func TestRunnerRendersReleasePlanBeforeTargetNamespaceAccessIsRestored(t *testing.T) {
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "render-plan-without-target-rbac", ProjectID: "checkout", Operation: "render_release_plan",
+		Environment: domain.Environment{ID: "feature", Project: "checkout", Namespace: "feature"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return false })
+	if result.Status != "succeeded" || result.ErrorCode != "" || len(result.RenderedResources) != 1 {
+		t.Fatalf("render must not require Helm release-storage access: %#v", result)
+	}
+}
+
 func TestReleasePlanResourcesDefaultsMissingManifestNamespace(t *testing.T) {
 	resources, err := releasePlanResources([]orchestrator.Manifest{{
 		Path: "deployment.yaml", Kind: "Deployment",
