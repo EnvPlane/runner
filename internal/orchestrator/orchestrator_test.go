@@ -6,6 +6,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1190,6 +1191,27 @@ func TestCLIHelmExecutorBuildsUninstallCommand(t *testing.T) {
 		if !requireArg[required] {
 			t.Fatalf("missing arg %q in %v", required, capturedArgs)
 		}
+	}
+}
+
+func TestCLIHelmExecutorDeletesNamespaceWithoutWaitingForFinalizers(t *testing.T) {
+	capturedName := ""
+	var capturedArgs []string
+	executor := &CLIHelmExecutor{
+		runCommand: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			capturedName = name
+			capturedArgs = append([]string(nil), args...)
+			return nil, nil
+		},
+	}
+	if err := executor.DeleteNamespace(context.Background(), "envplane-pr-328"); err != nil {
+		t.Fatalf("delete namespace: %v", err)
+	}
+	if capturedName != "kubectl" {
+		t.Fatalf("command = %q, want kubectl", capturedName)
+	}
+	if got, want := capturedArgs, []string{"delete", "namespace", "envplane-pr-328", "--ignore-not-found=true", "--wait=false"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("args = %#v, want %#v", got, want)
 	}
 }
 

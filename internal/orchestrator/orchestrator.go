@@ -197,7 +197,12 @@ func (e *CLIHelmExecutor) DeleteNamespace(ctx context.Context, namespace string)
 	if namespace == "" {
 		return nil
 	}
-	output, err := e.runCommand(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true")
+	// Namespace finalization can wait on unrelated workload finalizers for
+	// minutes. The delete request is sufficient here: ownership was checked
+	// before this executor is reached and the control plane observes cleanup
+	// asynchronously. Do not hold the Runner command lease while Kubernetes
+	// completes that background work.
+	output, err := e.runCommand(ctx, "kubectl", "delete", "namespace", namespace, "--ignore-not-found=true", "--wait=false")
 	if err != nil {
 		return fmt.Errorf("helm namespace delete failed for namespace %q: %s", namespace, helmOutputMessage(output, err))
 	}
