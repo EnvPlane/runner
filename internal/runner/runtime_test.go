@@ -515,6 +515,37 @@ func TestRunnerConfigUsesCanonicalEnvironment(t *testing.T) {
 	}
 }
 
+func TestRunnerCommandResultTimeoutIsDedicatedAndBounded(t *testing.T) {
+	cfg := runnerConfig{ReportTimeout: 10 * time.Second}
+	if got, want := cfg.commandResultTimeout(), 3*time.Minute; got != want {
+		t.Fatalf("default command result timeout=%s, want %s", got, want)
+	}
+	cfg.CommandResultTimeout = 75 * time.Second
+	if got, want := cfg.commandResultTimeout(), 75*time.Second; got != want {
+		t.Fatalf("configured command result timeout=%s, want %s", got, want)
+	}
+}
+
+func TestRunnerConfigRejectsCommandResultTimeoutShorterThanReportTimeout(t *testing.T) {
+	cfg := runnerConfig{
+		ControlPlaneURL:          "http://envplane-control-plane.envplane.svc:8080",
+		ControlPlaneEndpointMode: "sameCluster",
+		ProjectID:                "project",
+		ClusterID:                "cluster",
+		RunnerID:                 "runner",
+		RunnerNamespace:          "envplane-executors",
+		DeploymentMode:           "helm",
+		RunnerAuthToken:          "token",
+		HeartbeatInterval:        time.Second,
+		ReportTimeout:            10 * time.Second,
+		CommandResultTimeout:     9 * time.Second,
+		FeatureEnvWriterMode:     "releaseNamespace",
+	}
+	if err := cfg.validate(); err == nil || !strings.Contains(err.Error(), "command result timeout") {
+		t.Fatalf("validate timeout error=%v", err)
+	}
+}
+
 func TestRunnerRegistrationTokenFingerprintAdoptsLegacyAuthThenDetectsRotation(t *testing.T) {
 	authPath := filepath.Join(t.TempDir(), "runner-auth-token")
 	if err := persistRuntimeToken(authPath, "legacy-runner-auth"); err != nil {

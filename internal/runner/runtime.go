@@ -58,6 +58,7 @@ type runnerConfig struct {
 	ProjectConfigToken                   string
 	HeartbeatInterval                    time.Duration
 	ReportTimeout                        time.Duration
+	CommandResultTimeout                 time.Duration
 	HealthAddr                           string
 	RunnerVersion                        string
 	FeatureEnvWriterMode                 string
@@ -103,6 +104,7 @@ func runnerConfigFromEnv() runnerConfig {
 		ProjectConfigToken:                   getenv("ENVPLANE_PROJECT_CONFIG_TOKEN", ""),
 		HeartbeatInterval:                    time.Duration(getenvInt("ENVPLANE_RUNNER_HEARTBEAT_INTERVAL_SECONDS", 30)) * time.Second,
 		ReportTimeout:                        time.Duration(getenvInt("ENVPLANE_RUNNER_REPORT_TIMEOUT_SECONDS", 10)) * time.Second,
+		CommandResultTimeout:                 time.Duration(getenvInt("ENVPLANE_RUNNER_COMMAND_RESULT_TIMEOUT_SECONDS", 180)) * time.Second,
 		HealthAddr:                           getenv("ENVPLANE_RUNNER_HEALTH_ADDR", ":8080"),
 		RunnerVersion:                        getenv("ENVPLANE_RUNNER_VERSION", "dev"),
 		FeatureEnvWriterMode:                 strings.TrimSpace(getenv("ENVPLANE_FEATURE_ENV_WRITER_MODE", "releaseNamespace")),
@@ -245,7 +247,20 @@ func (c runnerConfig) validate() error {
 	if c.ReportTimeout <= 0 {
 		return fmt.Errorf("report timeout must be positive")
 	}
+	if c.CommandResultTimeout > 0 && c.CommandResultTimeout < c.ReportTimeout {
+		return fmt.Errorf("command result timeout must not be shorter than report timeout")
+	}
 	return nil
+}
+
+func (c runnerConfig) commandResultTimeout() time.Duration {
+	if c.CommandResultTimeout > 0 {
+		return c.CommandResultTimeout
+	}
+	if c.ReportTimeout > 3*time.Minute {
+		return c.ReportTimeout
+	}
+	return 3 * time.Minute
 }
 
 func validateRunnerControlPlaneEndpoint(rawURL, endpointMode string) error {
@@ -801,9 +816,12 @@ func pollRunnerCommandsOnceWithFound(ctx context.Context, cfg runnerConfig, clie
 	result.RunnerIdentityIssuedAt = command.RunnerIdentityIssuedAt
 	// Result delivery must survive cancellation of the command execution
 	// context during process shutdown.
-	reportCtx, reportCancel := context.WithTimeout(context.Background(), cfg.ReportTimeout)
+	resultTimeout := cfg.commandResultTimeout()
+	resultClient := *client
+	resultClient.Timeout = resultTimeout
+	reportCtx, reportCancel := context.WithTimeout(context.Background(), resultTimeout)
 	defer reportCancel()
-	if err := reportRunnerCommandResult(reportCtx, cfg, client, command.ID, result); err != nil {
+	if err := reportRunnerCommandResult(reportCtx, cfg, &resultClient, command.ID, result); err != nil {
 		if isRunnerStaleBootstrapIdentityError(err) {
 			markRunnerStaleBootstrapIdentity(state, health, logger, err)
 			return false, true
