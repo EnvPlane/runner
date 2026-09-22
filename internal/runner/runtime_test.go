@@ -292,6 +292,28 @@ func TestRunnerConfigRequiresStableHTTPSForRemoteControlPlaneEndpoint(t *testing
 	}
 }
 
+func TestRunnerConfigAllowsDisabledFeatureWriterWithoutHelmTargets(t *testing.T) {
+	cfg := runnerConfig{
+		ControlPlaneURL:          "https://api.remote.example",
+		ControlPlaneEndpointMode: "remote",
+		ProjectID:                "checkout",
+		ClusterID:                "remote-cluster",
+		RunnerID:                 "checkout-runner",
+		RunnerNamespace:          "envplane-system",
+		DeploymentMode:           "helm",
+		RunnerAuthToken:          "runner-auth-token",
+		FeatureEnvWriterMode:     "disabled",
+		HeartbeatInterval:        time.Second,
+		ReportTimeout:            time.Second,
+	}
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("disabled feature writer must be valid: %v", err)
+	}
+	if targets := cfg.helmTargetNamespaces(); len(targets) != 0 {
+		t.Fatalf("disabled feature writer Helm targets=%v, want none", targets)
+	}
+}
+
 func TestRunnerControlPlaneHTTPClientTrustsMountedPrivateCA(t *testing.T) {
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/health" {

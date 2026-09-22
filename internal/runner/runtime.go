@@ -232,8 +232,8 @@ func (c runnerConfig) validate() error {
 		return fmt.Errorf("ENVPLANE_RUNNER_DEPLOYMENT_MODE is required")
 	}
 	mode := strings.TrimSpace(c.FeatureEnvWriterMode)
-	if mode != "releaseNamespace" && mode != "preconfiguredNamespaces" && mode != "generatedFeatureNamespaces" {
-		return fmt.Errorf("ENVPLANE_FEATURE_ENV_WRITER_MODE must be releaseNamespace, preconfiguredNamespaces, or generatedFeatureNamespaces")
+	if mode != "disabled" && mode != "releaseNamespace" && mode != "preconfiguredNamespaces" && mode != "generatedFeatureNamespaces" {
+		return fmt.Errorf("ENVPLANE_FEATURE_ENV_WRITER_MODE must be disabled, releaseNamespace, preconfiguredNamespaces, or generatedFeatureNamespaces")
 	}
 	if (mode == "preconfiguredNamespaces" || mode == "generatedFeatureNamespaces") && len(c.FeatureEnvWriterNamespaces) == 0 {
 		return fmt.Errorf("ENVPLANE_FEATURE_ENV_WRITER_NAMESPACES is required for %s", mode)
