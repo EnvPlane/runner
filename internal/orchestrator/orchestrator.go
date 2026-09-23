@@ -301,19 +301,27 @@ func (e *CLIHelmExecutor) Readiness(ctx context.Context, options HelmReadinessOp
 	if namespace == "" {
 		return true, nil
 	}
-	output, err := e.runCommand(ctx, "kubectl", "get", "pods", "--namespace", namespace, "-l", "release="+strings.TrimSpace(options.Release), "-o", "json")
-	if err != nil {
-		if isKubectlNoResources(output, err) {
-			return false, nil
-		}
-		if isKubectlNotFound(err, output) {
-			return true, nil
-		}
-		return false, fmt.Errorf("helm workload readiness check failed for namespace %q release %q: %s", namespace, options.Release, helmOutputMessage(output, err))
-	}
 	var podList kubernetesPodList
-	if err := json.Unmarshal(output, &podList); err != nil {
-		return false, fmt.Errorf("helm workload readiness parse failed for namespace %q release %q: %w", namespace, options.Release, err)
+	// Helm charts commonly use the standard instance label; older charts use
+	// "release". Do not treat an empty result from the first selector as a
+	// workload with no Pods until the legacy selector has also been checked.
+	for _, selector := range []string{"app.kubernetes.io/instance=" + strings.TrimSpace(options.Release), "release=" + strings.TrimSpace(options.Release)} {
+		output, err := e.runCommand(ctx, "kubectl", "get", "pods", "--namespace", namespace, "-l", selector, "-o", "json")
+		if err != nil {
+			if isKubectlNoResources(output, err) {
+				continue
+			}
+			if isKubectlNotFound(err, output) {
+				return true, nil
+			}
+			return false, fmt.Errorf("helm workload readiness check failed for namespace %q release %q: %s", namespace, options.Release, helmOutputMessage(output, err))
+		}
+		if err := json.Unmarshal(output, &podList); err != nil {
+			return false, fmt.Errorf("helm workload readiness parse failed for namespace %q release %q: %w", namespace, options.Release, err)
+		}
+		if len(podList.Items) != 0 {
+			break
+		}
 	}
 	if len(podList.Items) == 0 {
 		return false, nil

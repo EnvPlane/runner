@@ -1602,6 +1602,27 @@ func TestCLIHelmExecutorBuildsReadinessCommand(t *testing.T) {
 	}
 }
 
+func TestCLIHelmExecutorReadinessUsesStandardHelmInstanceLabel(t *testing.T) {
+	var selectors []string
+	executor := &CLIHelmExecutor{
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			for i, arg := range args {
+				if arg == "-l" {
+					selectors = append(selectors, args[i+1])
+				}
+			}
+			return []byte(`{"items":[{"status":{"phase":"Running","conditions":[{"type":"Ready","status":"True"}]}}]}`), nil
+		},
+	}
+	ready, err := executor.Readiness(context.Background(), HelmReadinessOptions{Release: "test-release", Namespace: "feature-ns"})
+	if err != nil || !ready {
+		t.Fatalf("readiness = %t, err = %v", ready, err)
+	}
+	if len(selectors) != 1 || selectors[0] != "app.kubernetes.io/instance=test-release" {
+		t.Fatalf("selectors = %v", selectors)
+	}
+}
+
 func TestCLIHelmExecutorTreatsMissingReleaseAsNotFound(t *testing.T) {
 	executor := &CLIHelmExecutor{
 		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
