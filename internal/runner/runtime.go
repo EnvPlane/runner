@@ -922,11 +922,17 @@ func isRunnerAuthTokenNotIssuedError(err error) bool {
 		if apiError.status != http.StatusUnauthorized {
 			return false
 		}
-		detail := strings.ToLower(apiError.detail)
-		return strings.Contains(detail, "token is not issued") || strings.Contains(detail, "invalid runner auth token")
+		return isRunnerRuntimeAuthRecoveryDetail(apiError.detail)
 	}
 	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "401") && (strings.Contains(message, "token is not issued") || strings.Contains(message, "invalid runner auth token"))
+	return strings.Contains(message, "401") && isRunnerRuntimeAuthRecoveryDetail(message)
+}
+
+func isRunnerRuntimeAuthRecoveryDetail(detail string) bool {
+	detail = strings.ToLower(detail)
+	return strings.Contains(detail, "token is not issued") ||
+		strings.Contains(detail, "invalid runner auth token") ||
+		strings.Contains(detail, "missing runtime auth credential")
 }
 
 func isRunnerCommandTransportError(err error) bool {
