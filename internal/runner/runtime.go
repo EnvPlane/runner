@@ -1268,7 +1268,7 @@ var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
 	},
 	"fluxcd": {
 		"gitopsRepo": {}, "gitopsPath": {}, "fluxNamespace": {}, "sourceRefName": {},
-		"sourceRefNamespace": {}, "kustomizationName": {}, "commitMode": {},
+		"sourceRefNamespace": {}, "kustomizationName": {}, "kustomizationPath": {}, "commitMode": {},
 	},
 	"argocd": {
 		"serverUrl": {}, "credentialsSecretRef": {},

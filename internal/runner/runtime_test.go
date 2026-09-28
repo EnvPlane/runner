@@ -913,6 +913,27 @@ func TestRunnerProjectConfigAcceptsManifestTemplateSourceFingerprint(t *testing.
 	}
 }
 
+func TestRunnerProjectConfigAcceptsCompiledFluxKustomizationPath(t *testing.T) {
+	config := map[string]any{
+		"deployment": map[string]any{
+			"backend": "fluxcd",
+			"fluxcd": map[string]any{
+				"gitopsRepo":         "https://gitlab.example.test/platform/gitops.git",
+				"gitopsPath":         "clusters/test/projects/orders/environments/{{ .PRNumber }}",
+				"fluxNamespace":      "flux-system",
+				"sourceRefName":      "orders-gitops",
+				"sourceRefNamespace": "flux-system",
+				"kustomizationName":  "orders-prs",
+				"kustomizationPath":  "clusters/test/projects/orders",
+				"commitMode":         "direct",
+			},
+		},
+	}
+	if err := validateRunnerProjectConfig(config); err != nil {
+		t.Fatalf("compiled Flux configuration was rejected: %v", err)
+	}
+}
+
 func TestProjectConfigForRunnerCommandCarriesChartVersion(t *testing.T) {
 	config := projectConfigForRunnerCommand(domain.RunnerCommand{
 		ChartRef:     "oci://registry.example.com/charts/orders",
