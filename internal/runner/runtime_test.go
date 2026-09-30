@@ -28,6 +28,22 @@ type fakeRunnerCommandBackend struct {
 	status domain.EnvironmentStatus
 }
 
+type fakeFluxNamespaceCleanupExecutor struct {
+	managed       bool
+	managedErr    error
+	deleteErr     error
+	deletedTarget string
+}
+
+func (f *fakeFluxNamespaceCleanupExecutor) IsNamespaceManaged(_ context.Context, _, _, _ string) (bool, error) {
+	return f.managed, f.managedErr
+}
+
+func (f *fakeFluxNamespaceCleanupExecutor) DeleteNamespace(_ context.Context, namespace string) error {
+	f.deletedTarget = namespace
+	return f.deleteErr
+}
+
 type recordingRunnerCommandBackend struct {
 	fakeRunnerCommandBackend
 	applyCalls int
@@ -975,6 +991,36 @@ func TestRunnerDeleteAcceptsReleasePlanAfterHelmTargetIsReported(t *testing.T) {
 	result := executeRunnerCommandWithBackend(context.Background(), runnerConfig{ProjectID: "checkout"}, command, fakeRunnerCommandBackend{})
 	if result.Status != "succeeded" || !result.CleanupVerified {
 		t.Fatalf("delete result = %#v", result)
+	}
+}
+
+func TestRunnerCleansOnlyOwnedRemoteFluxNamespace(t *testing.T) {
+	fake := &fakeFluxNamespaceCleanupExecutor{managed: true}
+	previous := newFluxNamespaceCleanupExecutor
+	newFluxNamespaceCleanupExecutor = func() fluxNamespaceCleanupExecutor { return fake }
+	t.Cleanup(func() { newFluxNamespaceCleanupExecutor = previous })
+
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "cleanup-flux", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(namespace string) bool { return namespace == "envplane-pr-feature-42" })
+	if result.Status != "succeeded" || !result.CleanupVerified || fake.deletedTarget != "envplane-pr-feature-42" {
+		t.Fatalf("cleanup result=%#v deleted=%q", result, fake.deletedTarget)
+	}
+}
+
+func TestRunnerRejectsUnownedRemoteFluxNamespace(t *testing.T) {
+	fake := &fakeFluxNamespaceCleanupExecutor{managed: false}
+	previous := newFluxNamespaceCleanupExecutor
+	newFluxNamespaceCleanupExecutor = func() fluxNamespaceCleanupExecutor { return fake }
+	t.Cleanup(func() { newFluxNamespaceCleanupExecutor = previous })
+
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "reject-flux", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
+	if result.ErrorCode != "cleanup_ownership_violation" || fake.deletedTarget != "" {
+		t.Fatalf("cleanup result=%#v deleted=%q", result, fake.deletedTarget)
 	}
 }
 

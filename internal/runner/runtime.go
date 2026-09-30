@@ -1005,6 +1005,15 @@ type runnerCommandBackend interface {
 	DeploymentTarget(domain.Environment, domain.ProjectConfig) (string, string, error)
 }
 
+type fluxNamespaceCleanupExecutor interface {
+	IsNamespaceManaged(context.Context, string, string, string) (bool, error)
+	DeleteNamespace(context.Context, string) error
+}
+
+var newFluxNamespaceCleanupExecutor = func() fluxNamespaceCleanupExecutor {
+	return orchestrator.NewCLIHelmExecutor()
+}
+
 func executeRunnerCommandWithBackend(ctx context.Context, cfg runnerConfig, command domain.RunnerCommand, backend runnerCommandBackend) domain.RunnerCommandResult {
 	return executeRunnerCommandWithNamespaceGuard(ctx, cfg, command, backend, nil)
 }
@@ -1045,6 +1054,34 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	}
 	var err error
 	switch command.Operation {
+	case "cleanup_flux_namespace":
+		if strings.TrimSpace(command.Environment.ID) == "" || strings.TrimSpace(command.Environment.Namespace) != "envplane-pr-"+strings.TrimSpace(command.Environment.ID) {
+			result.ErrorCode = "cleanup_ownership_violation"
+			result.Error = "remote Flux cleanup requires the environment's dedicated preview namespace"
+			return result
+		}
+		if namespaceAllowed != nil && !namespaceAllowed(command.Environment.Namespace) {
+			result.ErrorCode = "runner_namespace_access_denied"
+			result.Error = "target Runner is not authorized for preview namespace " + command.Environment.Namespace
+			return result
+		}
+		executor := newFluxNamespaceCleanupExecutor()
+		managed, cleanupErr := executor.IsNamespaceManaged(ctx, command.Environment.Namespace, command.Environment.Project, command.Environment.ID)
+		if cleanupErr != nil {
+			result.Error = cleanupErr.Error()
+			return result
+		}
+		if !managed {
+			result.ErrorCode = "cleanup_ownership_violation"
+			result.Error = "preview namespace is not owned by the environment"
+			return result
+		}
+		if cleanupErr := executor.DeleteNamespace(ctx, command.Environment.Namespace); cleanupErr != nil {
+			result.Error = cleanupErr.Error()
+			return result
+		}
+		result.CleanupVerified = true
+		result.EnvironmentStatus = string(domain.StatusTerminated)
 	case "validate_helm_chart":
 		result.Namespace = ""
 		result.ReleaseName = ""
