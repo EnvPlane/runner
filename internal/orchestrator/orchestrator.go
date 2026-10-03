@@ -176,7 +176,7 @@ func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options 
 	}
 	rendered, err := e.runCommand(ctx, "helm", args...)
 	if err != nil {
-		return fmt.Errorf("Helm Secret ownership preflight could not render chart")
+		return errors.New("helm Secret ownership preflight could not render chart")
 	}
 	decoder := yaml.NewDecoder(bytes.NewReader(rendered))
 	for {
@@ -190,7 +190,7 @@ func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options 
 		if err := decoder.Decode(&item); err == io.EOF {
 			break
 		} else if err != nil {
-			return fmt.Errorf("Helm Secret ownership preflight could not decode chart")
+			return errors.New("helm Secret ownership preflight could not decode chart")
 		}
 		if item.Kind != "Secret" {
 			continue
@@ -200,11 +200,11 @@ func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options 
 			namespace = options.Namespace
 		}
 		if namespace != options.Namespace || len(item.Metadata.Name) > 253 || !secretMetadataNamePattern.MatchString(item.Metadata.Name) {
-			return fmt.Errorf("Helm Secret ownership preflight rejected cross-namespace or invalid Secret identity")
+			return errors.New("helm Secret ownership preflight rejected cross-namespace or invalid Secret identity")
 		}
 		metadata, err := e.runCommand(ctx, "kubectl", "get", "secret", item.Metadata.Name, "--namespace", namespace, "--ignore-not-found", "-o=jsonpath={.metadata}")
 		if err != nil {
-			return fmt.Errorf("Helm Secret ownership preflight could not inspect Secret metadata")
+			return errors.New("helm Secret ownership preflight could not inspect Secret metadata")
 		}
 		if len(bytes.TrimSpace(metadata)) == 0 {
 			continue
@@ -214,10 +214,10 @@ func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options 
 			Annotations map[string]string `json:"annotations"`
 		}
 		if json.Unmarshal(metadata, &existing) != nil {
-			return fmt.Errorf("Helm Secret ownership preflight received invalid metadata")
+			return errors.New("helm Secret ownership preflight received invalid metadata")
 		}
 		if existing.Labels["app.kubernetes.io/managed-by"] != "Helm" || existing.Annotations["meta.helm.sh/release-name"] != options.ReleaseName || existing.Annotations["meta.helm.sh/release-namespace"] != namespace {
-			return fmt.Errorf("Secret %s/%s ownership conflict: recompile a compatible chart and create a new environment; existing Secret was not modified", namespace, item.Metadata.Name)
+			return fmt.Errorf("secret %s/%s ownership conflict: recompile a compatible chart and create a new environment; existing Secret was not modified", namespace, item.Metadata.Name)
 		}
 	}
 	return nil
