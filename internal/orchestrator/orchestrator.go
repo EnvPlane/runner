@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -163,6 +164,8 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 
 // Inspect only metadata for existing Secrets. Never adopt resources or include
 // rendered Secret bytes in errors; Helm remains responsible for atomic apply.
+var secretMetadataNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$`)
+
 func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options HelmUpgradeOptions) error {
 	args := []string{"template", options.ReleaseName, options.ChartRef, "--namespace", options.Namespace}
 	if options.ValuesFile != "" {
@@ -196,8 +199,8 @@ func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options 
 		if namespace == "" {
 			namespace = options.Namespace
 		}
-		if namespace != options.Namespace || item.Metadata.Name == "" {
-			return fmt.Errorf("Helm Secret ownership preflight rejected cross-namespace or unnamed Secret")
+		if namespace != options.Namespace || len(item.Metadata.Name) > 253 || !secretMetadataNamePattern.MatchString(item.Metadata.Name) {
+			return fmt.Errorf("Helm Secret ownership preflight rejected cross-namespace or invalid Secret identity")
 		}
 		metadata, err := e.runCommand(ctx, "kubectl", "get", "secret", item.Metadata.Name, "--namespace", namespace, "--ignore-not-found", "-o=jsonpath={.metadata}")
 		if err != nil {

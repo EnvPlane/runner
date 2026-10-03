@@ -2,8 +2,25 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"testing"
 )
+
+func TestSecretOwnershipPreflightRejectsInvalidCLIIdentities(t *testing.T) {
+	for _, secretName := range []string{"--all", "", "foreign/name", "unsafe name", strings.Repeat("a", 254)} {
+		inspected := false
+		e := &CLIHelmExecutor{runCommand: func(_ context.Context, command string, args ...string) ([]byte, error) {
+			if command == "helm" && args[0] == "template" {
+				return []byte("kind: Secret\nmetadata:\n  name: '" + secretName + "'\n"), nil
+			}
+			inspected = true
+			return nil, nil
+		}}
+		if err := e.UpgradeInstall(context.Background(), HelmUpgradeOptions{ReleaseName: "own", ChartRef: "charts/app", Namespace: "feature"}); err == nil || inspected {
+			t.Fatalf("invalid Secret identity reached a CLI command: %q", secretName)
+		}
+	}
+}
 
 func TestSecretOwnershipPreflightNeverAppliesForeignSecret(t *testing.T) {
 	for _, metadata := range []string{`{"labels":{"app.kubernetes.io/managed-by":"envplane"}}`, `{"labels":{"app.kubernetes.io/managed-by":"Helm"},"annotations":{"meta.helm.sh/release-name":"foreign","meta.helm.sh/release-namespace":"feature"}}`} {
