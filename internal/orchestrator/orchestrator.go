@@ -862,6 +862,9 @@ func (b *HelmDirectBackend) renderHelmImageValues(environment domain.Environment
 		valuesByName["ingressHost"] = domainName
 		valuesByName["previewHost"] = domainName
 		valuesByName["previewUrl"] = "https://" + domainName
+		if previewURL := strings.TrimSpace(environment.URL); previewURL != "" {
+			valuesByName["previewUrl"] = previewURL
+		}
 		valuesByName["private_domain"] = domainName
 		valuesByName["main_domain"] = domainName
 	}
