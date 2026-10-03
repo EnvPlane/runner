@@ -917,7 +917,10 @@ func TestHelmDirectBackendApplyIdempotentUpgradeKeepsRelease(t *testing.T) {
 
 func TestHelmDirectBackendApplyMapsErrorAsReadableReason(t *testing.T) {
 	executor := &CLIHelmExecutor{
-		runCommand: func(_ context.Context, _ string, _ ...string) ([]byte, error) {
+		runCommand: func(_ context.Context, _ string, args ...string) ([]byte, error) {
+			if args[0] == "template" {
+				return nil, nil
+			}
 			return []byte("chart pull failed"), errors.New("exit status 1")
 		},
 	}

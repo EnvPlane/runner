@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
@@ -127,6 +128,9 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 	if strings.TrimSpace(options.ChartRef) != "" && !domain.IsSafeHelmChartRef(options.ChartRef) {
 		return fmt.Errorf("invalid helm chart reference")
 	}
+	if err := e.preflightSecretOwnership(ctx, options); err != nil {
+		return err
+	}
 	args := []string{
 		"upgrade",
 		"--install",
@@ -155,6 +159,65 @@ func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgrad
 		return nil
 	}
 	return fmt.Errorf("helm apply failed for release %q in namespace %q: %s", options.ReleaseName, options.Namespace, helmOutputMessage(output, err))
+}
+
+// Inspect only metadata for existing Secrets. Never adopt resources or include
+// rendered Secret bytes in errors; Helm remains responsible for atomic apply.
+func (e *CLIHelmExecutor) preflightSecretOwnership(ctx context.Context, options HelmUpgradeOptions) error {
+	args := []string{"template", options.ReleaseName, options.ChartRef, "--namespace", options.Namespace}
+	if options.ValuesFile != "" {
+		args = append(args, "-f", options.ValuesFile)
+	}
+	if options.ChartVersion != "" && !isDirectHelmChartArchive(options.ChartRef) {
+		args = append(args, "--version", options.ChartVersion)
+	}
+	rendered, err := e.runCommand(ctx, "helm", args...)
+	if err != nil {
+		return fmt.Errorf("Helm Secret ownership preflight could not render chart")
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(rendered))
+	for {
+		var item struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name      string `yaml:"name"`
+				Namespace string `yaml:"namespace"`
+			} `yaml:"metadata"`
+		}
+		if err := decoder.Decode(&item); err == io.EOF {
+			break
+		} else if err != nil {
+			return fmt.Errorf("Helm Secret ownership preflight could not decode chart")
+		}
+		if item.Kind != "Secret" {
+			continue
+		}
+		namespace := item.Metadata.Namespace
+		if namespace == "" {
+			namespace = options.Namespace
+		}
+		if namespace != options.Namespace || item.Metadata.Name == "" {
+			return fmt.Errorf("Helm Secret ownership preflight rejected cross-namespace or unnamed Secret")
+		}
+		metadata, err := e.runCommand(ctx, "kubectl", "get", "secret", item.Metadata.Name, "--namespace", namespace, "--ignore-not-found", "-o=jsonpath={.metadata}")
+		if err != nil {
+			return fmt.Errorf("Helm Secret ownership preflight could not inspect Secret metadata")
+		}
+		if len(bytes.TrimSpace(metadata)) == 0 {
+			continue
+		}
+		var existing struct {
+			Labels      map[string]string `json:"labels"`
+			Annotations map[string]string `json:"annotations"`
+		}
+		if json.Unmarshal(metadata, &existing) != nil {
+			return fmt.Errorf("Helm Secret ownership preflight received invalid metadata")
+		}
+		if existing.Labels["app.kubernetes.io/managed-by"] != "Helm" || existing.Annotations["meta.helm.sh/release-name"] != options.ReleaseName || existing.Annotations["meta.helm.sh/release-namespace"] != namespace {
+			return fmt.Errorf("Secret %s/%s ownership conflict: recompile a compatible chart and create a new environment; existing Secret was not modified", namespace, item.Metadata.Name)
+		}
+	}
+	return nil
 }
 
 type HelmUninstallOptions struct {
