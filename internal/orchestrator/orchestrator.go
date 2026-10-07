@@ -113,7 +113,8 @@ type helmStatusOutput struct {
 }
 
 type CLIHelmExecutor struct {
-	runCommand func(context.Context, string, ...string) ([]byte, error)
+	runCommand     func(context.Context, string, ...string) ([]byte, error)
+	runReadCommand func(context.Context, string, ...string) ([]byte, error)
 }
 
 func NewCLIHelmExecutor() *CLIHelmExecutor {
@@ -122,7 +123,26 @@ func NewCLIHelmExecutor() *CLIHelmExecutor {
 			cmd := exec.CommandContext(ctx, name, args...)
 			return cmd.CombinedOutput()
 		},
+		runReadCommand: func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			// Keep kubectl warning stderr separate from machine-readable JSON.
+			return exec.CommandContext(ctx, name, args...).Output()
+		},
 	}
+}
+
+func (e *CLIHelmExecutor) namespaceRead(ctx context.Context, args ...string) ([]byte, error) {
+	if e.runReadCommand != nil {
+		output, err := e.runReadCommand(ctx, "kubectl", args...)
+		// Output keeps stderr on ExitError. Preserve failed lookup diagnostics
+		// for NotFound classification, but never mix successful warning stderr
+		// into object JSON.
+		var exitError *exec.ExitError
+		if err != nil && errors.As(err, &exitError) {
+			output = append(output, exitError.Stderr...)
+		}
+		return output, err
+	}
+	return e.runCommand(ctx, "kubectl", args...)
 }
 
 func (e *CLIHelmExecutor) UpgradeInstall(ctx context.Context, options HelmUpgradeOptions) error {
@@ -309,7 +329,7 @@ func (e *CLIHelmExecutor) IsNamespaceManaged(ctx context.Context, namespace, pro
 	if namespace == "" {
 		return false, nil
 	}
-	output, err := e.runCommand(ctx, "kubectl", "get", "namespace", namespace, "-o", "json")
+	output, err := e.namespaceRead(ctx, "get", "namespace", namespace, "-o", "json")
 	if err != nil {
 		if isKubectlNoResources(output, err) || isKubectlNotFound(err, output) {
 			return false, nil
@@ -332,11 +352,25 @@ func (e *CLIHelmExecutor) IsNamespaceManaged(ctx context.Context, namespace, pro
 // NamespaceExists distinguishes absence from a foreign namespace during
 // idempotent Flux cleanup. Transport/RBAC errors are never treated as absence.
 func (e *CLIHelmExecutor) NamespaceExists(ctx context.Context, namespace string) (bool, error) {
-	output, err := e.runCommand(ctx, "kubectl", "get", "namespace", strings.TrimSpace(namespace), "-o", "json", "--ignore-not-found")
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		return false, fmt.Errorf("namespace existence check requires an exact namespace")
+	}
+	output, err := e.namespaceRead(ctx, "get", "namespace", namespace, "-o", "json", "--ignore-not-found")
 	if err != nil {
 		return false, fmt.Errorf("namespace existence check failed: %s", helmOutputMessage(output, err))
 	}
-	return strings.TrimSpace(string(output)) != "", nil
+	if strings.TrimSpace(string(output)) == "" {
+		return false, nil
+	}
+	var observed kubernetesNamespace
+	if err := json.Unmarshal(output, &observed); err != nil {
+		return false, fmt.Errorf("namespace existence parse failed: %w", err)
+	}
+	if observed.Metadata.Name != namespace {
+		return false, fmt.Errorf("namespace existence response identity mismatch")
+	}
+	return true, nil
 }
 
 // namespaceOwnedByEnvironment accepts the current Helm-managed namespace
