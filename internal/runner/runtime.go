@@ -1007,6 +1007,7 @@ type runnerCommandBackend interface {
 
 type fluxNamespaceCleanupExecutor interface {
 	IsNamespaceManaged(context.Context, string, string, string) (bool, error)
+	NamespaceExists(context.Context, string) (bool, error)
 	DeleteNamespace(context.Context, string) error
 }
 
@@ -1072,6 +1073,16 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 			return result
 		}
 		if !managed {
+			exists, checkErr := executor.NamespaceExists(ctx, command.Environment.Namespace)
+			if checkErr != nil {
+				result.Error = checkErr.Error()
+				return result
+			}
+			if !exists {
+				result.CleanupVerified = true
+				result.EnvironmentStatus = string(domain.StatusTerminated)
+				break
+			}
 			result.ErrorCode = "cleanup_ownership_violation"
 			result.Error = "preview namespace is not owned by the environment"
 			return result

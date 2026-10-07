@@ -33,6 +33,12 @@ type fakeFluxNamespaceCleanupExecutor struct {
 	managedErr    error
 	deleteErr     error
 	deletedTarget string
+	absent        bool
+	existsErr     error
+}
+
+func (f *fakeFluxNamespaceCleanupExecutor) NamespaceExists(_ context.Context, _ string) (bool, error) {
+	return !f.absent, f.existsErr
 }
 
 func (f *fakeFluxNamespaceCleanupExecutor) IsNamespaceManaged(_ context.Context, _, _, _ string) (bool, error) {
@@ -1021,6 +1027,28 @@ func TestRunnerRejectsUnownedRemoteFluxNamespace(t *testing.T) {
 	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
 	if result.ErrorCode != "cleanup_ownership_violation" || fake.deletedTarget != "" {
 		t.Fatalf("cleanup result=%#v deleted=%q", result, fake.deletedTarget)
+	}
+}
+
+func TestRunnerVerifiesAlreadyAbsentRemoteFluxNamespace(t *testing.T) {
+	fake := &fakeFluxNamespaceCleanupExecutor{absent: true}
+	previous := newFluxNamespaceCleanupExecutor
+	newFluxNamespaceCleanupExecutor = func() fluxNamespaceCleanupExecutor { return fake }
+	t.Cleanup(func() { newFluxNamespaceCleanupExecutor = previous })
+	result := executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "already-absent", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
+	if result.Status != "succeeded" || !result.CleanupVerified || fake.deletedTarget != "" {
+		t.Fatalf("absent namespace cleanup result=%#v", result)
+	}
+	fake.existsErr = errors.New("forbidden")
+	result = executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "access-denied", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
+	if result.CleanupVerified || fake.deletedTarget != "" {
+		t.Fatal("lookup failure accepted as absence")
 	}
 }
 

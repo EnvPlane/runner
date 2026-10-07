@@ -329,6 +329,16 @@ func (e *CLIHelmExecutor) IsNamespaceManaged(ctx context.Context, namespace, pro
 	return namespaceOwnedByEnvironment(labels, namespace, projectID, environmentID), nil
 }
 
+// NamespaceExists distinguishes absence from a foreign namespace during
+// idempotent Flux cleanup. Transport/RBAC errors are never treated as absence.
+func (e *CLIHelmExecutor) NamespaceExists(ctx context.Context, namespace string) (bool, error) {
+	output, err := e.runCommand(ctx, "kubectl", "get", "namespace", strings.TrimSpace(namespace), "-o", "json", "--ignore-not-found")
+	if err != nil {
+		return false, fmt.Errorf("namespace existence check failed: %s", helmOutputMessage(output, err))
+	}
+	return strings.TrimSpace(string(output)) != "", nil
+}
+
 // namespaceOwnedByEnvironment accepts the current Helm-managed namespace
 // labels and the earlier project-scoped reconciler labels. The fallback is
 // deliberately constrained to the canonical dedicated preview namespace so a
