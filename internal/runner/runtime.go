@@ -1093,6 +1093,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 			result.Error = "preview namespace is not owned by the environment"
 			return result
 		}
+		attemptRunnerStorageCleanupCapture(ctx, cfg, command)
 		if cleanupErr := executor.DeleteNamespace(ctx, command.Environment.Namespace); cleanupErr != nil {
 			result.Error = cleanupErr.Error()
 			return result
@@ -1176,6 +1177,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 		// envplane.io managed/project/environment labels match the command.
 		// The Runner therefore remains the sole Kubernetes actor even for an
 		// audited force-clean recovery command.
+		attemptRunnerStorageCleanupCapture(ctx, cfg, command)
 		err = backend.Delete(ctx, command.Environment, projectConfig)
 		if err == nil {
 			result.CleanupVerified = true
