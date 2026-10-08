@@ -924,6 +924,12 @@ func isRunnerAuthTokenNotIssuedError(err error) bool {
 		}
 		return isRunnerRuntimeAuthRecoveryDetail(apiError.detail)
 	}
+	// Command HTTP errors have already been classified using their actual
+	// response status. A 403 body mentioning "401" must not request recovery.
+	var commandAuth runnerCommandAuthenticationError
+	if errors.As(err, &commandAuth) {
+		return false
+	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "401") && isRunnerRuntimeAuthRecoveryDetail(message)
 }
@@ -969,7 +975,7 @@ func nextRunnerCommand(ctx context.Context, cfg runnerConfig, client *http.Clien
 			return domain.RunnerCommand{}, false, runnerCommandEndpointMissingError{detail: detail}
 		}
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			if resp.StatusCode == http.StatusUnauthorized && strings.Contains(strings.ToLower(string(body)), "token is not issued") {
+			if resp.StatusCode == http.StatusUnauthorized && isRunnerRuntimeAuthRecoveryDetail(string(body)) {
 				return domain.RunnerCommand{}, false, runnerAPIError{status: resp.StatusCode, code: "runner_auth_token_not_issued", detail: detail}
 			}
 			return domain.RunnerCommand{}, false, runnerCommandAuthenticationError{detail: detail}
