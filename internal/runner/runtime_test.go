@@ -1010,8 +1010,27 @@ func TestRunnerCleansOnlyOwnedRemoteFluxNamespace(t *testing.T) {
 		ID: "cleanup-flux", Operation: "cleanup_flux_namespace",
 		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
 	}, fakeRunnerCommandBackend{}, func(namespace string) bool { return namespace == "envplane-pr-feature-42" })
-	if result.Status != "succeeded" || !result.CleanupVerified || fake.deletedTarget != "envplane-pr-feature-42" {
+	if result.Status != "succeeded" || result.CleanupVerified || result.EnvironmentStatus != string(domain.StatusTerminating) || fake.deletedTarget != "envplane-pr-feature-42" {
 		t.Fatalf("cleanup result=%#v deleted=%q", result, fake.deletedTarget)
+	}
+
+	// An immediate successful absence read may complete cleanup, but a
+	// permission failure must never be interpreted as absence.
+	fake.absent = true
+	result = executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "cleanup-completed", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
+	if result.Status != "succeeded" || !result.CleanupVerified || result.EnvironmentStatus != string(domain.StatusTerminated) {
+		t.Fatalf("completed cleanup result=%#v", result)
+	}
+	fake.existsErr = errors.New("forbidden")
+	result = executeRunnerCommandWithNamespaceGuard(context.Background(), runnerConfig{ProjectID: "checkout"}, domain.RunnerCommand{
+		ID: "cleanup-unverified", Operation: "cleanup_flux_namespace",
+		Environment: domain.Environment{ID: "feature-42", Project: "checkout", Namespace: "envplane-pr-feature-42"},
+	}, fakeRunnerCommandBackend{}, func(string) bool { return true })
+	if result.Status != "failed" || result.CleanupVerified {
+		t.Fatalf("unverified cleanup result=%#v", result)
 	}
 }
 

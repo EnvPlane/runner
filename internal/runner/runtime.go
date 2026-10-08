@@ -1091,8 +1091,18 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 			result.Error = cleanupErr.Error()
 			return result
 		}
-		result.CleanupVerified = true
-		result.EnvironmentStatus = string(domain.StatusTerminated)
+		// DeleteNamespace submits --wait=false. Only a successful absence
+		// observation certifies cleanup; finalizers may still be running.
+		exists, checkErr := executor.NamespaceExists(ctx, command.Environment.Namespace)
+		if checkErr != nil {
+			result.Error = checkErr.Error()
+			return result
+		}
+		result.CleanupVerified = !exists
+		result.EnvironmentStatus = string(domain.StatusTerminating)
+		if !exists {
+			result.EnvironmentStatus = string(domain.StatusTerminated)
+		}
 	case "validate_helm_chart":
 		result.Namespace = ""
 		result.ReleaseName = ""
