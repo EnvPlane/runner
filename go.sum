@@ -2,8 +2,8 @@ github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ3
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/envplane/contracts v0.1.107 h1:wxUioPSnH7psQP10tbFwBs97/6Qm9yYrddTM6Bb/QC8=
-github.com/envplane/contracts v0.1.107/go.mod h1:/aVUc5NCmh/amgea7odPI1YxjxLf2dfFDvuOieTUgYs=
+github.com/envplane/contracts v0.1.109 h1:kGbfcbeSfbdV6G4hPf5yN8iJl8Kay16wBZeIpVYuedw=
+github.com/envplane/contracts v0.1.109/go.mod h1:KYR62hqF41fqGSuAPOU9clbDhk1GsmcemCGlJ6RBmpQ=
 github.com/envplane/gitops v0.1.4 h1:c1BnLsQ1ePtV6BvYXP+OEs7Ue9bOLd+UUJ4xKKenwk8=
 github.com/envplane/gitops v0.1.4/go.mod h1:3Kb4H8p5npnPhKLTNIVudCpJeAAndWieH+UmhhWGBrA=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
