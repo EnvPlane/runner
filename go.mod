@@ -3,7 +3,7 @@ module github.com/envplane/runner
 go 1.25.13
 
 require (
-	github.com/envplane/contracts v0.1.106
+	github.com/envplane/contracts v0.1.107
 	github.com/envplane/gitops v0.1.4
 	github.com/jackc/pgx/v5 v5.11.0
 	gopkg.in/yaml.v3 v3.0.1
