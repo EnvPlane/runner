@@ -1,6 +1,6 @@
 module github.com/envplane/runner
 
-go 1.25.13
+go 1.26.9
 
 require (
 	github.com/envplane/contracts v0.1.107
@@ -15,6 +15,6 @@ require (
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/rogpeppe/go-internal v1.16.0 // indirect
-	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/text v0.29.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
 )
