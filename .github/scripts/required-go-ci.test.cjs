@@ -7,7 +7,7 @@ const {requireGoCI} = require('./required-go-ci.cjs');
 const workflowDir = path.join(__dirname, '..', 'workflows');
 const ciName = fs.readFileSync(path.join(workflowDir, 'ci.yaml'), 'utf8').match(/^name: (.+)$/m)[1];
 const repository = fs.readFileSync(path.join(workflowDir, 'publish-main.yaml'), 'utf8')
-  .match(/expectedRepository: '(EnvPlane\/[^']+)'/)[1];
+  .match(/expectedRepository: '(envplane\/[^']+)'/)[1];
 const sha = 'a'.repeat(40);
 
 function fixture() {
@@ -45,7 +45,7 @@ function fixture() {
     }
   }};
   const options = {github, expectedRepository: repository, expectedName: ciName,
-    context: {repo: {owner: 'EnvPlane', repo: repository.split('/')[1]}, sha,
+    context: {repo: {owner: 'envplane', repo: repository.split('/')[1]}, sha,
       runId: 500, eventName: 'push', ref: 'refs/heads/main', payload: {repository: {full_name: repository}}},
     core: {info() {}, setOutput(key, value) {state.outputs.push([key, value]);}},
     now: () => clock, sleep: async ms => {clock += ms; state.sleeps++;},
@@ -54,11 +54,20 @@ function fixture() {
 }
 
 test('exact successful main CI and current test attempt releases exact SHA', async () => {
-  const {options, state} = fixture();
-  await requireGoCI(options);
-  assert.deepEqual(state.outputs, [['sha', sha]]);
-  assert.equal(state.lists, 2);
-  assert.equal(state.sleeps, 0);
+  for (const mixedCase of [false, true]) {
+    const {options, state} = fixture();
+    if (mixedCase) {
+      options.context.repo.owner = options.context.repo.owner.toUpperCase();
+      options.context.repo.repo = options.context.repo.repo.toUpperCase();
+      options.context.payload.repository.full_name = repository.toUpperCase();
+      state.run.repository.full_name = repository.toUpperCase();
+      state.run.head_repository.full_name = repository.toUpperCase();
+    }
+    await requireGoCI(options);
+    assert.deepEqual(state.outputs, [['sha', sha]]);
+    assert.equal(state.lists, 2);
+    assert.equal(state.sleeps, 0);
+  }
 });
 test('manual main and main-history version tags preserve publication support', async () => {
   for (const [eventName, ref] of [['workflow_dispatch', 'refs/heads/main'], ['push', 'refs/tags/v1.2.3']]) {
@@ -181,6 +190,11 @@ test('off-main tag, foreign repository, PR/manual feature cannot publish', async
     o => {o.github.rest.repos.compareCommits = async () => ({status: 200,
       data: {status: 'diverged', base_commit: {sha}, merge_base_commit: {sha: 'b'.repeat(40)}}});},
     o => {o.context.repo.owner = 'attacker';},
+    o => {o.context.repo.owner += '-lookalike';},
+    o => {o.context.payload.repository.full_name = repository + '-lookalike';},
+    o => {o.context.payload.repository.full_name = ' ' + repository;},
+    o => {o.context.payload.repository.full_name = null;},
+    o => {o.context.repo.repo += '-lookalike';},
     o => {o.context.eventName = 'pull_request';},
     o => {o.context.eventName = 'workflow_run';},
     o => {o.context.eventName = 'workflow_dispatch'; o.context.ref = 'refs/heads/feature';}

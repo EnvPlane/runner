@@ -8,9 +8,13 @@ const MAX_WAIT_MS = 20 * 60 * 1000;
 async function requireGoCI({github, context, core, expectedRepository, expectedName,
   now = Date.now, sleep = ms => new Promise(resolve => setTimeout(resolve, ms)),
   maxWaitMs = MAX_WAIT_MS, pollMs = 15000}) {
-  const repoName = context.repo.owner + '/' + context.repo.repo;
+  // GitHub repository identities are case-insensitive, not prefix/substring
+  // matches. Do not trim or otherwise broaden the exact trusted owner/repo.
+  const identity = value => typeof value === 'string' ? value.toLowerCase() : '';
+  const repoName = identity(context.repo.owner + '/' + context.repo.repo);
   const sha = context.sha;
-  if (repoName !== expectedRepository || context.payload.repository?.full_name !== repoName ||
+  if (repoName !== identity(expectedRepository) ||
+      identity(context.payload.repository?.full_name) !== repoName ||
       !/^[0-9a-f]{40}$/.test(sha) ||
       !((context.eventName === 'push' &&
          (context.ref === 'refs/heads/main' || /^refs\/tags\/v[^/]+$/.test(context.ref))) ||
@@ -69,7 +73,8 @@ async function requireGoCI({github, context, core, expectedRepository, expectedN
         ![WORKFLOW, WORKFLOW + '@main', WORKFLOW + '@refs/heads/main'].includes(run.path) ||
         run.name !== expectedName ||
         run.head_sha !== sha || run.head_branch !== 'main' || run.event !== 'push' ||
-        run.repository?.full_name !== repoName || run.head_repository?.full_name !== repoName ||
+        identity(run.repository?.full_name) !== repoName ||
+        identity(run.head_repository?.full_name) !== repoName ||
         !Number.isSafeInteger(run.run_attempt) || run.run_attempt < 1) {
       throw new Error('Required Go CI run is not exact trusted main evidence');
     }
