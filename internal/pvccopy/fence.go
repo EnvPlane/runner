@@ -20,8 +20,92 @@ import (
 )
 
 const fenceAPIVersion = "admissionregistration.k8s.io/v1"
+const fenceDigestAnnotation = "envplane.io/pvc-copy-fence-digest"
 
 var fenceNamespace = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+var fenceScopeID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]*(/[A-Za-z0-9][A-Za-z0-9._:-]*)*$`)
+var fenceSourceUID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,127}$`)
+var fenceIdentityDigest = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+type fenceSourceAuthority struct {
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	UID       string `json:"uid"`
+	Identity  string `json:"identity"`
+}
+
+// FenceNames returns the exact cluster-scoped policy and binding names for an
+// operator's resourceNames-limited reader profile. Their identity is source
+// authority, not environment/target/revision/plan identity: onboarding the same
+// source set and Runner once covers later feature environments. These names
+// confer no plan authorization and do not replace runtime source UID checks.
+// Only source-authority fields are required, so operators can render the reader
+// profile before any environment, target, template revision or plan exists.
+func FenceNames(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccount string) (policyName, bindingName string, err error) {
+	name, _, err := fenceAuthority(plan, runnerNamespace, runnerServiceAccount)
+	if err != nil {
+		return "", "", err
+	}
+	return name, name, nil
+}
+
+func fenceAuthority(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccount string) (name, digest string, err error) {
+	if len(plan.TenantID) > 512 || !fenceScopeID.MatchString(plan.TenantID) || len(plan.ProjectID) > 512 || !fenceScopeID.MatchString(plan.ProjectID) || !imageRef.MatchString(plan.Image) || len(plan.Items) == 0 {
+		return "", "", fmt.Errorf("%w: invalid admission fence source authority", ErrUnsafe)
+	}
+	if len(runnerNamespace) > 63 || !fenceNamespace.MatchString(runnerNamespace) || len(runnerServiceAccount) > 253 || !dnsName.MatchString(runnerServiceAccount) {
+		return "", "", fmt.Errorf("%w: invalid admission fence Runner identity", ErrUnsafe)
+	}
+	for _, label := range strings.Split(runnerServiceAccount, ".") {
+		if len(label) > 63 || !fenceNamespace.MatchString(label) {
+			return "", "", fmt.Errorf("%w: invalid admission fence Runner service account", ErrUnsafe)
+		}
+	}
+	sources := make([]fenceSourceAuthority, 0, len(plan.Items))
+	seen := map[string]bool{}
+	for _, item := range plan.Items {
+		ref := item.SourceNamespace + "/" + item.SourceName
+		if item.SourceTenantID != plan.TenantID || len(item.SourceNamespace) > 63 || !fenceNamespace.MatchString(item.SourceNamespace) || !fenceClaimName(item.SourceName) || !fenceSourceUID.MatchString(item.SourceUID) || !fenceIdentityDigest.MatchString(item.SourceIdentity) || seen[ref] {
+			return "", "", fmt.Errorf("%w: invalid or ambiguous admission fence source reference", ErrUnsafe)
+		}
+		seen[ref] = true
+		sources = append(sources, fenceSourceAuthority{item.SourceNamespace, item.SourceName, item.SourceUID, item.SourceIdentity})
+	}
+	sort.Slice(sources, func(i, j int) bool {
+		return sources[i].Namespace+"/"+sources[i].Name < sources[j].Namespace+"/"+sources[j].Name
+	})
+	// A dedicated versioned projection prevents unrelated per-environment plan
+	// fields or item IDs/bounds/order from entering the admission/RBAC identity.
+	authority := struct {
+		Version              string                 `json:"version"`
+		TenantID             string                 `json:"tenantId"`
+		ProjectID            string                 `json:"projectId"`
+		RunnerNamespace      string                 `json:"runnerNamespace"`
+		RunnerServiceAccount string                 `json:"runnerServiceAccount"`
+		Image                string                 `json:"image"`
+		Sources              []fenceSourceAuthority `json:"sources"`
+	}{"v1", plan.TenantID, plan.ProjectID, runnerNamespace, runnerServiceAccount, plan.Image, sources}
+	raw, err := json.Marshal(authority)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: admission fence authority encoding failed", ErrUnsafe)
+	}
+	hash := sha256.Sum256(raw)
+	// The full digest binds annotations and denial evidence; a 128-bit name
+	// suffix keeps the complete policy name within a DNS label's 63-byte bound.
+	return "envplane-pvc-copy-fence-" + hex.EncodeToString(hash[:16]), "sha256:" + hex.EncodeToString(hash[:]), nil
+}
+
+func fenceClaimName(name string) bool {
+	if len(name) > 253 || name == "" {
+		return false
+	}
+	for _, label := range strings.Split(name, ".") {
+		if len(label) > 63 || !fenceNamespace.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
 
 // FenceManifests returns administrator-installable manifests, never applies
 // them. Only source claims are fenced: the operator must hold this policy and
@@ -30,23 +114,13 @@ var fenceNamespace = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
 // (no helper credentials or new RBAC). A label alone is not authority.
 // Target exclusivity is NOT admission proof: it requires the caller's durable
 // prepublication gate/lease and the executor's consumer and partial-marker
-// checks. This fence neither releases that gate nor marks an environment Ready.
+// checks. Only source-authority fields are required for onboarding/rendering;
+// this fence neither authorizes a feature plan nor marks an environment Ready.
 func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccount string) (policy, binding map[string]any, err error) {
-	if err := plan.Validate(); err != nil {
-		return nil, nil, fmt.Errorf("%w: invalid admission fence plan", ErrUnsafe)
+	name, digest, err := fenceAuthority(plan, runnerNamespace, runnerServiceAccount)
+	if err != nil {
+		return nil, nil, err
 	}
-	if len(runnerNamespace) > 63 || !fenceNamespace.MatchString(runnerNamespace) || len(runnerServiceAccount) > 253 || !dnsName.MatchString(runnerServiceAccount) {
-		return nil, nil, fmt.Errorf("%w: invalid admission fence Runner identity", ErrUnsafe)
-	}
-	for _, label := range strings.Split(runnerServiceAccount, ".") {
-		if len(label) > 63 || !fenceNamespace.MatchString(label) {
-			return nil, nil, fmt.Errorf("%w: invalid admission fence Runner service account", ErrUnsafe)
-		}
-	}
-	// Hash the immutable digest, not a client-selectable policy name. A 128-bit
-	// suffix keeps the complete name within one DNS label's 63-byte bound.
-	hash := sha256.Sum256([]byte(plan.Digest))
-	name := "envplane-pvc-copy-fence-" + hex.EncodeToString(hash[:16])
 	username := "system:serviceaccount:" + runnerNamespace + ":" + runnerServiceAccount
 	common := strings.Join([]string{
 		"request.operation == 'CREATE'",
@@ -101,7 +175,7 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 		// request.namespace is authoritative, not a mutable object label.
 		consumer := "request.namespace == " + strconv.Quote(item.SourceNamespace) + " && has(object.spec.volumes) && object.spec.volumes.exists(v, has(v.persistentVolumeClaim) && v.persistentVolumeClaim.claimName == " + claim + ")"
 		expression := "!(" + consumer + ") || (" + common + " && " + helper + ")"
-		validations = append(validations, map[string]any{"expression": expression, "message": fenceMessage(plan)})
+		validations = append(validations, map[string]any{"expression": expression, "message": fenceMessage(digest)})
 	}
 	namespaces := make([]string, 0, len(namespaceSet))
 	for ns := range namespaceSet {
@@ -113,9 +187,9 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 		// PVCs/Secrets: even an unrelated Pod created by this Runner must be
 		// one of the exact allowed tokenless source helpers in this namespace.
 		expression := "request.operation != 'CREATE' || request.userInfo.username != " + strconv.Quote(username) + " || request.namespace != " + strconv.Quote(ns) + " || (" + common + " && (" + strings.Join(helperBindings[ns], " || ") + "))"
-		validations = append(validations, map[string]any{"expression": expression, "message": fenceMessage(plan)})
+		validations = append(validations, map[string]any{"expression": expression, "message": fenceMessage(digest)})
 	}
-	annotations := map[string]any{"envplane.io/pvc-copy-plan-digest": plan.Digest}
+	annotations := map[string]any{fenceDigestAnnotation: digest}
 	policy = map[string]any{
 		"apiVersion": fenceAPIVersion, "kind": "ValidatingAdmissionPolicy",
 		"metadata": map[string]any{"name": name, "annotations": annotations},
@@ -132,7 +206,7 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 	}
 	binding = map[string]any{
 		"apiVersion": fenceAPIVersion, "kind": "ValidatingAdmissionPolicyBinding",
-		"metadata": map[string]any{"name": name, "annotations": map[string]any{"envplane.io/pvc-copy-plan-digest": plan.Digest}},
+		"metadata": map[string]any{"name": name, "annotations": map[string]any{fenceDigestAnnotation: digest}},
 		"spec": map[string]any{
 			"policyName": name, "validationActions": []string{"Deny"},
 			"matchResources": map[string]any{
@@ -179,6 +253,9 @@ type fenceObject struct {
 func (k *Kubectl) RequireAdmissionFence(ctx context.Context, plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccount string) error {
 	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
+	if err := plan.Validate(); err != nil {
+		return fmt.Errorf("%w: invalid admission fence execution plan", ErrUnsafe)
+	}
 	policy, binding, err := FenceManifests(plan, runnerNamespace, runnerServiceAccount)
 	if err != nil {
 		return err
@@ -187,6 +264,7 @@ func (k *Kubectl) RequireAdmissionFence(ctx context.Context, plan domain.PVCCopy
 		return fmt.Errorf("%w: admission fence transport unavailable", ErrUnsafe)
 	}
 	name := policy["metadata"].(map[string]any)["name"].(string)
+	digest := policy["metadata"].(map[string]any)["annotations"].(map[string]any)[fenceDigestAnnotation].(string)
 	for i, expected := range []map[string]any{policy, binding} {
 		resource := "validatingadmissionpolicies.admissionregistration.k8s.io"
 		if i == 1 {
@@ -197,7 +275,7 @@ func (k *Kubectl) RequireAdmissionFence(ctx context.Context, plan domain.PVCCopy
 			// Do not expose arbitrary kubectl output or response content.
 			return fmt.Errorf("%w: administrator-provisioned admission fence unavailable", ErrUnsafe)
 		}
-		if actual.APIVersion != fenceAPIVersion || actual.Kind != expected["kind"] || actual.Metadata.Name != name || actual.Metadata.Namespace != "" || actual.Metadata.UID == "" || actual.Metadata.Generation <= 0 || actual.Metadata.DeletionTimestamp != nil || actual.Metadata.Annotations["envplane.io/pvc-copy-plan-digest"] != plan.Digest {
+		if actual.APIVersion != fenceAPIVersion || actual.Kind != expected["kind"] || actual.Metadata.Name != name || actual.Metadata.Namespace != "" || actual.Metadata.UID == "" || actual.Metadata.Generation <= 0 || actual.Metadata.DeletionTimestamp != nil || actual.Metadata.Annotations[fenceDigestAnnotation] != digest {
 			return fmt.Errorf("%w: admission fence identity drift", ErrUnsafe)
 		}
 		var gotSpec, wantSpec any
@@ -219,11 +297,11 @@ func (k *Kubectl) RequireAdmissionFence(ctx context.Context, plan domain.PVCCopy
 			}
 		}
 	}
-	return k.probeAdmissionFence(ctx, plan, name)
+	return k.probeAdmissionFence(ctx, plan, name, digest)
 }
 
-func fenceMessage(plan domain.PVCCopyPlan) string {
-	return "envplane PVC copy source fence [" + plan.Digest + "]"
+func fenceMessage(digest string) string {
+	return "envplane PVC copy source fence [" + digest + "]"
 }
 
 // AdmissionFenceProbeRunner permits synthetic denial evidence in tests without
@@ -247,8 +325,8 @@ func (b *fenceProbeOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-func (k *Kubectl) probeAdmissionFence(ctx context.Context, plan domain.PVCCopyPlan, name string) error {
-	expected := fmt.Sprintf("ValidatingAdmissionPolicy '%s' with binding '%s' denied request: %s", name, name, fenceMessage(plan))
+func (k *Kubectl) probeAdmissionFence(ctx context.Context, plan domain.PVCCopyPlan, name, digest string) error {
+	expected := fmt.Sprintf("ValidatingAdmissionPolicy '%s' with binding '%s' denied request: %s", name, name, fenceMessage(digest))
 	for _, item := range plan.Items {
 		// A deliberately writable consumer cannot satisfy the helper exception.
 		// No digest message or policy name is included in the submitted object,

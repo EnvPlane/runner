@@ -2,8 +2,6 @@ package pvccopy
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -40,10 +38,9 @@ func fenceTestObjects(t *testing.T, p domain.PVCCopyPlan) (map[string]any, map[s
 	if err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.Sum256([]byte(p.Digest))
-	expectedName := "envplane-pvc-copy-fence-" + hex.EncodeToString(hash[:16])
-	if policy["metadata"].(map[string]any)["name"] != expectedName || len(expectedName) > 63 {
-		t.Fatal("policy name is not bound to the immutable digest")
+	expectedName, bindingName, err := FenceNames(p, "runner-ns", "runtime-runner")
+	if err != nil || policy["metadata"].(map[string]any)["name"] != expectedName || binding["metadata"].(map[string]any)["name"] != bindingName || len(expectedName) > 63 {
+		t.Fatal("policy/binding names do not match the source authority projection")
 	}
 	// Normalize through JSON just as the Kubernetes wire response does.
 	clone := func(obj map[string]any) map[string]any {
@@ -85,7 +82,7 @@ func (f *fenceTestCommands) Run(ctx context.Context, args []string, input io.Rea
 		f.t.Fatalf("unexpected resource: %v", args)
 	}
 	if args[2] != obj["metadata"].(map[string]any)["name"] {
-		f.t.Fatal("policy name was not derived from the plan")
+		return errors.New("requested source-bound fence not found")
 	}
 	if f.readErr != nil {
 		return f.readErr
@@ -145,12 +142,13 @@ func TestFenceManifestsCanonicalSourceOnly(t *testing.T) {
 		t.Fatal("generation mutated input")
 	}
 	raw, _ := json.Marshal(policy["spec"])
-	for _, required := range []string{"system:serviceaccount:runner-ns:runtime-runner", "serviceAccountName == 'default'", "readOnly == true", "recursiveReadOnly == 'Enabled'", "automountServiceAccountToken == false", "size(object.spec.containers) == 1", "DAC_OVERRIDE", "database-a", "database-b", "source-a", "source-b", p.Image, p.Digest, "pods/ephemeralcontainers"} {
+	fenceDigest := policy["metadata"].(map[string]any)["annotations"].(map[string]any)[fenceDigestAnnotation].(string)
+	for _, required := range []string{"system:serviceaccount:runner-ns:runtime-runner", "serviceAccountName == 'default'", "readOnly == true", "recursiveReadOnly == 'Enabled'", "automountServiceAccountToken == false", "size(object.spec.containers) == 1", "DAC_OVERRIDE", "database-a", "database-b", "source-a", "source-b", p.Image, fenceDigest, "pods/ephemeralcontainers"} {
 		if !strings.Contains(string(raw), required) {
 			t.Errorf("missing fence constraint %q", required)
 		}
 	}
-	for _, forbidden := range []string{"target-a", "target-b", "preview", "CHOWN", "FOWNER"} {
+	for _, forbidden := range []string{"target-a", "target-b", "preview", "CHOWN", "FOWNER", p.Digest} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Errorf("source fence contains %q", forbidden)
 		}
@@ -207,7 +205,7 @@ func TestRequireAdmissionFenceRejectsDriftBeforeProbe(t *testing.T) {
 		"missing UID": func(p, b map[string]any) { delete(p["metadata"].(map[string]any), "uid") },
 		"deleting":    func(p, b map[string]any) { p["metadata"].(map[string]any)["deletionTimestamp"] = "now" },
 		"wrong digest": func(p, b map[string]any) {
-			b["metadata"].(map[string]any)["annotations"].(map[string]any)["envplane.io/pvc-copy-plan-digest"] = "forged"
+			b["metadata"].(map[string]any)["annotations"].(map[string]any)[fenceDigestAnnotation] = "forged"
 		},
 		"ignore failures": func(p, b map[string]any) { p["spec"].(map[string]any)["failurePolicy"] = "Ignore" },
 		"exclude pods": func(p, b map[string]any) {
@@ -278,7 +276,8 @@ func TestAdmissionFenceNegativeProbeEvidence(t *testing.T) {
 			defer cancel()
 			f.probe = func(_ context.Context, _ []string, _ map[string]any, out io.Writer) error {
 				name := policy["metadata"].(map[string]any)["name"].(string)
-				text := "ValidatingAdmissionPolicy '" + name + "' with binding '" + name + "' denied request: " + fenceMessage(p)
+				digest := policy["metadata"].(map[string]any)["annotations"].(map[string]any)[fenceDigestAnnotation].(string)
+				text := "ValidatingAdmissionPolicy '" + name + "' with binding '" + name + "' denied request: " + fenceMessage(digest)
 				switch mode {
 				case "admitted", "disabled plugin":
 					return nil
@@ -287,7 +286,7 @@ func TestAdmissionFenceNegativeProbeEvidence(t *testing.T) {
 				case "wrong policy":
 					text = strings.Replace(text, "ValidatingAdmissionPolicy '"+name+"'", "ValidatingAdmissionPolicy 'other'", 1)
 				case "wrong digest":
-					text = strings.ReplaceAll(text, p.Digest, "sha256:"+strings.Repeat("e", 64))
+					text = strings.ReplaceAll(text, digest, "sha256:"+strings.Repeat("e", 64))
 				case "wrong binding":
 					text = strings.Replace(text, "binding '"+name+"'", "binding 'other'", 1)
 				case "overflow":
@@ -322,7 +321,7 @@ func TestFenceRejectsInvalidInputsAndUnavailableReads(t *testing.T) {
 	}
 	invalid := p
 	invalid.Digest = "sha256:" + strings.Repeat("f", 64)
-	if _, _, err := FenceManifests(invalid, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
+	if err := (&Kubectl{}).RequireAdmissionFence(context.Background(), invalid, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
 		t.Fatal("tampered plan accepted")
 	}
 	policy, binding := fenceTestObjects(t, p)
@@ -353,5 +352,178 @@ func TestFenceRequiresProbeTransportAndCurrentAcceptedCondition(t *testing.T) {
 	var nilTransport *Kubectl
 	if err := nilTransport.RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
 		t.Fatal("nil transport accepted")
+	}
+}
+
+func fenceResealTestPlan(t *testing.T, p domain.PVCCopyPlan) domain.PVCCopyPlan {
+	t.Helper()
+	var err error
+	p.Digest, err = p.CanonicalDigest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestFenceSourceAuthorityReusedAcrossFeaturePlans(t *testing.T) {
+	base := fenceTestPlan(t)
+	policy, binding := fenceTestObjects(t, base)
+	basePolicyName, baseBindingName, err := FenceNames(base, "runner-ns", "runtime-runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*domain.PVCCopyPlan){
+		"environment":      func(p *domain.PVCCopyPlan) { p.EnvironmentID = "another-feature" },
+		"target namespace": func(p *domain.PVCCopyPlan) { p.TargetNamespace = "another-preview" },
+		"target claims":    func(p *domain.PVCCopyPlan) { p.Items[0].TargetName = "another-target" },
+		"template revision": func(p *domain.PVCCopyPlan) {
+			p.TemplateRevisionID = "another-revision"
+			p.TemplateDigest = "sha256:" + strings.Repeat("e", 64)
+		},
+		"plan id":          func(p *domain.PVCCopyPlan) { p.PlanID = "another-plan" },
+		"item id":          func(p *domain.PVCCopyPlan) { p.Items[0].ID = "another-item" },
+		"execution bounds": func(p *domain.PVCCopyPlan) { p.MaxBytes *= 2; p.StorageQuotaBytes *= 2; p.TimeoutSeconds *= 2 },
+		"unselected namespace": func(p *domain.PVCCopyPlan) {
+			p.AllowedSourceNamespaces = append(p.AllowedSourceNamespaces, "unselected")
+		},
+		"all feature bindings": func(p *domain.PVCCopyPlan) {
+			p.EnvironmentID, p.TargetNamespace, p.TemplateRevisionID, p.PlanID = "another-feature", "another-preview", "another-revision", "another-plan"
+			p.TemplateDigest = "sha256:" + strings.Repeat("e", 64)
+			p.Items[0].TargetName, p.Items[1].TargetName = "another-target-a", "another-target-b"
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := fenceTestPlan(t)
+			mutate(&p)
+			p = fenceResealTestPlan(t, p)
+			if p.Digest == base.Digest {
+				t.Fatal("test did not change feature plan digest")
+			}
+			policyName, bindingName, err := FenceNames(p, "runner-ns", "runtime-runner")
+			if err != nil || policyName != basePolicyName || bindingName != baseBindingName {
+				t.Fatalf("feature plan required new fence/RBAC names: %s %s %v", policyName, bindingName, err)
+			}
+			gotPolicy, gotBinding, err := FenceManifests(p, "runner-ns", "runtime-runner")
+			wantPolicy, wantBinding, _ := FenceManifests(base, "runner-ns", "runtime-runner")
+			if err != nil || !reflect.DeepEqual(gotPolicy, wantPolicy) || !reflect.DeepEqual(gotBinding, wantBinding) {
+				t.Fatal("feature change altered source fence specification, annotation or denial message")
+			}
+			f := &fenceTestCommands{t: t, policy: policy, binding: binding}
+			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); err != nil || f.probes != len(p.Items) {
+				t.Fatalf("previously provisioned source fence not reusable/enforcement not reprobed: %v", err)
+			}
+		})
+	}
+}
+
+func TestFenceChangedSourceAuthorityRejectsStaleFence(t *testing.T) {
+	base := fenceTestPlan(t)
+	policy, binding := fenceTestObjects(t, base)
+	oldPolicyName, oldBindingName, err := FenceNames(base, "runner-ns", "runtime-runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string]func(*domain.PVCCopyPlan, *string, *string){
+		"source UID": func(p *domain.PVCCopyPlan, ns, sa *string) { p.Items[0].SourceUID = "replacement-uid" },
+		"source identity": func(p *domain.PVCCopyPlan, ns, sa *string) {
+			p.Items[0].SourceIdentity = "sha256:" + strings.Repeat("e", 64)
+		},
+		"source name": func(p *domain.PVCCopyPlan, ns, sa *string) { p.Items[0].SourceName = "replacement-claim" },
+		"source namespace": func(p *domain.PVCCopyPlan, ns, sa *string) {
+			p.Items[0].SourceNamespace = "replacement-source"
+			p.AllowedSourceNamespaces = append(p.AllowedSourceNamespaces, "replacement-source")
+		},
+		"source set": func(p *domain.PVCCopyPlan, ns, sa *string) { p.Items = p.Items[:1] },
+		"tenant": func(p *domain.PVCCopyPlan, ns, sa *string) {
+			p.TenantID = "another-tenant"
+			for i := range p.Items {
+				p.Items[i].SourceTenantID = p.TenantID
+			}
+		},
+		"project":          func(p *domain.PVCCopyPlan, ns, sa *string) { p.ProjectID = "another-project" },
+		"runner namespace": func(p *domain.PVCCopyPlan, ns, sa *string) { *ns = "another-runner-ns" },
+		"runner SA":        func(p *domain.PVCCopyPlan, ns, sa *string) { *sa = "another-runtime-runner" },
+		"image": func(p *domain.PVCCopyPlan, ns, sa *string) {
+			p.Image = "example.test/runner@sha256:" + strings.Repeat("e", 64)
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			p := fenceTestPlan(t)
+			ns, sa := "runner-ns", "runtime-runner"
+			mutate(&p, &ns, &sa)
+			p = fenceResealTestPlan(t, p)
+			policyName, bindingName, err := FenceNames(p, ns, sa)
+			if err != nil || policyName == oldPolicyName || bindingName == oldBindingName {
+				t.Fatalf("changed source authority reused old reader identity: %v", err)
+			}
+			f := &fenceTestCommands{t: t, policy: policy, binding: binding}
+			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, ns, sa); !errors.Is(err, ErrUnsafe) || f.probes != 0 {
+				t.Fatalf("stale source fence accepted/probed: %v", err)
+			}
+			// Renaming an old object cannot make its old digest/spec acceptable.
+			stalePolicy, staleBinding := fenceTestObjects(t, base)
+			stalePolicy["metadata"].(map[string]any)["name"] = policyName
+			staleBinding["metadata"].(map[string]any)["name"] = bindingName
+			f = &fenceTestCommands{t: t, policy: stalePolicy, binding: staleBinding}
+			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, ns, sa); !errors.Is(err, ErrUnsafe) || f.probes != 0 {
+				t.Fatalf("renamed stale fence accepted/probed: %v", err)
+			}
+		})
+	}
+}
+
+func TestFenceRenderingBeforeAnyFeatureExists(t *testing.T) {
+	base := fenceTestPlan(t)
+	sourceOnly := domain.PVCCopyPlan{TenantID: base.TenantID, ProjectID: base.ProjectID, Image: base.Image}
+	for _, item := range base.Items {
+		sourceOnly.Items = append(sourceOnly.Items, domain.PVCCopyItem{SourceTenantID: item.SourceTenantID, SourceNamespace: item.SourceNamespace, SourceName: item.SourceName, SourceUID: item.SourceUID, SourceIdentity: item.SourceIdentity})
+	}
+	policyName, bindingName, err := FenceNames(sourceOnly, "runner-ns", "runtime-runner")
+	wantPolicyName, wantBindingName, _ := FenceNames(base, "runner-ns", "runtime-runner")
+	if err != nil || policyName != wantPolicyName || bindingName != wantBindingName {
+		t.Fatalf("pre-feature reader names differ: %v", err)
+	}
+	policy, binding, err := FenceManifests(sourceOnly, "runner-ns", "runtime-runner")
+	wantPolicy, wantBinding, _ := FenceManifests(base, "runner-ns", "runtime-runner")
+	if err != nil || !reflect.DeepEqual(policy, wantPolicy) || !reflect.DeepEqual(binding, wantBinding) {
+		t.Fatal("pre-feature source policy/binding differs from feature policy/binding")
+	}
+	// Rendering metadata is not execution authority. Refuse incomplete plans
+	// before any metadata/probe transport or other action can occur.
+	if err := (&Kubectl{}).RequireAdmissionFence(context.Background(), sourceOnly, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
+		t.Fatal("source-only rendering input was accepted as an execution plan")
+	}
+}
+
+func TestFenceRenderingRejectsInvalidSourceAuthority(t *testing.T) {
+	for name, mutate := range map[string]func(*domain.PVCCopyPlan){
+		"missing sources":     func(p *domain.PVCCopyPlan) { p.Items = nil },
+		"missing tenant":      func(p *domain.PVCCopyPlan) { p.TenantID = "" },
+		"missing project":     func(p *domain.PVCCopyPlan) { p.ProjectID = "" },
+		"cross tenant":        func(p *domain.PVCCopyPlan) { p.Items[0].SourceTenantID = "other" },
+		"duplicate source":    func(p *domain.PVCCopyPlan) { p.Items = append(p.Items, p.Items[0]) },
+		"namespace injection": func(p *domain.PVCCopyPlan) { p.Items[0].SourceNamespace = "bad' || true" },
+		"claim injection":     func(p *domain.PVCCopyPlan) { p.Items[0].SourceName = "bad' || true" },
+		"invalid claim":       func(p *domain.PVCCopyPlan) { p.Items[0].SourceName = "a..b" },
+		"missing UID":         func(p *domain.PVCCopyPlan) { p.Items[0].SourceUID = "" },
+		"UID injection":       func(p *domain.PVCCopyPlan) { p.Items[0].SourceUID = "bad/name" },
+		"source identity":     func(p *domain.PVCCopyPlan) { p.Items[0].SourceIdentity = "not-a-digest" },
+		"mutable image":       func(p *domain.PVCCopyPlan) { p.Image = "example.test/runner:latest" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := fenceTestPlan(t)
+			mutate(&p)
+			if _, _, err := FenceNames(p, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
+				t.Fatal("unsafe source authority accepted by reader renderer")
+			}
+			if _, _, err := FenceManifests(p, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) {
+				t.Fatal("unsafe source authority accepted by policy renderer")
+			}
+		})
 	}
 }
