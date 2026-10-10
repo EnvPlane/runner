@@ -116,13 +116,15 @@ func TestMySQL8EngineConsistentFixture(t *testing.T) {
 	if engineSQL(ctx, source, "/config/app.cnf", "SELECT @@server_uuid;\n", uuid) != nil {
 		t.Fatal("fixture UUID query")
 	}
-	session, stopSession := context.WithCancel(ctx)
+	operation, stopOperation := context.WithCancel(ctx)
+	defer stopOperation()
+	session, stopSession := backupSessionContext(operation, 2*time.Minute)
 	defer stopSession()
 	input, writer := io.Pipe()
 	output, sink := io.Pipe()
 	h := &backupHold{in: writer, out: bufio.NewReaderSize(output, 4096), reader: output, done: make(chan error, 1), cancel: stopSession, uuid: strings.TrimSpace(uuid.String())}
 	go func() {
-		err := dockerRun(session, []string{"exec", "-i", source, "mysql", "--defaults-extra-file=/config/admin.cnf", "--skip-reconnect", "--batch", "--skip-column-names", "--unbuffered"}, input, sink)
+		err := dockerRun(session, []string{"exec", "-i", source, "mysql", "--defaults-extra-file=/config/admin.cnf", "--binary-mode=0", "--local-infile=0", "--skip-reconnect", "--batch", "--skip-column-names", "--unbuffered"}, input, sink)
 		_ = input.CloseWithError(err)
 		_ = sink.CloseWithError(err)
 		h.done <- err
@@ -136,10 +138,21 @@ func TestMySQL8EngineConsistentFixture(t *testing.T) {
 		t.Fatal("backup lock challenge failed")
 	}
 	defer func() {
+		// Exercise cancellation before release with the production session lifetime.
+		stopOperation()
 		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if h.Release(cleanup) != nil {
 			t.Error("backup lock release")
+			return
+		}
+		// Actual DDL succeeding after acknowledged unlock proves the fixture's
+		// server no longer holds the lock; a local process exit alone is not proof.
+		if engineSQL(cleanup, source, "/config/admin.cnf", "SELECT 1;\n", io.Discard) != nil {
+			t.Error("source unavailable after cancelled-operation release")
+		}
+		if dockerRun(cleanup, []string{"exec", "-i", source, "mysql", "-uroot", "--protocol=SOCKET"}, strings.NewReader("SET SESSION lock_wait_timeout=1; ALTER TABLE app.records ADD COLUMN released INT;\n"), io.Discard) != nil {
+			t.Error("actual DDL remained blocked after release")
 		}
 	}()
 	// DDL must actually be blocked. Snapshot metadata comparisons are not proof.

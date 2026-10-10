@@ -212,7 +212,10 @@ func (k *fakeKube) Run(ctx context.Context, args []string, in io.Reader, out io.
 						return err
 					}
 				}
-				if strings.HasPrefix(line, "SELECT 'envplane_lock_") {
+				if line == "quit" {
+					return nil
+				}
+				if strings.HasPrefix(line, "SELECT 'envplane_lock_") || strings.HasPrefix(line, "SELECT 'envplane_unlock'") {
 					marker := strings.Split(line, "'")[1]
 					if _, err := fmt.Fprintf(out, "%s\t42\tserver-uuid\n", marker); err != nil {
 						return err

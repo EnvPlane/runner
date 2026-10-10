@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/envplane/runner/internal/pvccopy"
 )
@@ -187,6 +188,14 @@ func clientArgs(p Plan, target, admin bool) []string {
 	}
 	return append(a, "--protocol=TCP", "--host="+p.Source.TLSServerName, "--port="+strconv.Itoa(p.Source.Port), "--ssl-mode=VERIFY_IDENTITY", "--ssl-ca=/credentials/ca.pem", "--database="+p.Source.Database)
 }
+
+// Only this fixed control protocol needs mysql's quit command. SQL restore
+// streams always retain binary-mode=1, which disables client-side commands.
+func backupClientArgs(p Plan) []string {
+	args := clientArgs(p, false, true)
+	args = slices.DeleteFunc(args, func(arg string) bool { return arg == "--binary-mode=1" })
+	return append(args, "--binary-mode=0")
+}
 func (k *KubeTransport) query(ctx context.Context, p Plan, sql string) (string, error) {
 	return k.queryCredential(ctx, p, sql, false)
 }
@@ -351,12 +360,12 @@ func (k *KubeTransport) HoldDDL(ctx context.Context, p Plan) (Hold, error) {
 	if err != nil {
 		return nil, err
 	}
-	session, cancel := context.WithCancel(ctx)
+	session, cancel := backupSessionContext(ctx, p.Timeout)
 	input, writer := io.Pipe()
 	output, sink := io.Pipe()
 	h := &backupHold{in: writer, out: bufio.NewReaderSize(output, 4096), reader: output, done: make(chan error, 1), cancel: cancel, uuid: strings.TrimSpace(identity)}
 	go func() {
-		err := k.exec(session, p, k.source, false, clientArgs(p, false, true), input, sink)
+		err := k.exec(session, p, k.source, false, backupClientArgs(p), input, sink)
 		_ = input.CloseWithError(err)
 		_ = sink.CloseWithError(err)
 		h.done <- err
@@ -373,6 +382,16 @@ func (k *KubeTransport) HoldDDL(ctx context.Context, p Plan) (Hold, error) {
 		return nil, ErrUnsafe
 	}
 	return h, nil
+}
+
+// Keep the connection alive through operation cancellation solely for bounded
+// explicit release. The operation's existing deadline still bounds transfer;
+// the lock session receives at most five additional seconds for teardown.
+func backupSessionContext(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
+	if deadline, ok := ctx.Deadline(); ok {
+		return context.WithDeadline(context.WithoutCancel(ctx), deadline.Add(5*time.Second))
+	}
+	return context.WithTimeout(context.WithoutCancel(ctx), timeout+5*time.Second)
 }
 func (h *backupHold) Check(ctx context.Context) error {
 	h.mu.Lock()
@@ -417,10 +436,36 @@ func (h *backupHold) Release(ctx context.Context) error {
 		return ErrUnsafe
 	}
 	h.closed = true
-	// Closing stdin exits the connection, releasing its instance backup lock.
-	closeErr := h.in.Close()
 	defer h.cancel()
+	defer func() { _ = h.in.Close() }()     // pipe cleanup after checked protocol/exit
 	defer func() { _ = h.reader.Close() }() // output pipe cleanup, not a durable writer
+	stop := context.AfterFunc(ctx, func() {
+		h.cancel()
+		_ = h.in.CloseWithError(ctx.Err())
+		_ = h.reader.CloseWithError(ctx.Err())
+	})
+	defer stop()
+	if h.connectionID == 0 || ctx.Err() != nil {
+		return ErrUnsafe
+	}
+	// No EOF assumption: kubectl remote stdin EOF need not terminate a client.
+	// Acknowledgment on the pinned session proves UNLOCK completed, then quit
+	// explicitly terminates mysql. Never accept a lost acknowledgment or exit.
+	if _, err := io.WriteString(h.in, "UNLOCK INSTANCE;\nSELECT 'envplane_unlock', CONNECTION_ID(), @@server_uuid;\n"); err != nil {
+		return safeError(ctx, err)
+	}
+	line, err := h.out.ReadSlice('\n')
+	if err != nil {
+		return safeError(ctx, err)
+	}
+	f := strings.Split(strings.TrimSpace(string(line)), "\t")
+	if len(f) != 3 || f[0] != "envplane_unlock" || f[1] != strconv.FormatUint(h.connectionID, 10) || f[2] != h.uuid {
+		return ErrUnsafe
+	}
+	if _, err := io.WriteString(h.in, "quit\n"); err != nil {
+		return safeError(ctx, err)
+	}
+	closeErr := h.in.Close()
 	select {
 	case err := <-h.done:
 		if closeErr != nil || err != nil {
