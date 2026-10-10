@@ -62,3 +62,5 @@ jobs:
         run: |
           total="$(go tool cover -func=cover.out | awk '/^total:/ {gsub(/%/, "", $NF); print $NF}')"
           awk -v total="$total" 'BEGIN { if (total < 20) { print "coverage below 20%: " total "%"; exit 1 } }'
+      - name: Test exact-SHA publication CI gate
+        run: node --test .github/scripts/required-go-ci.test.cjs

@@ -12,6 +12,7 @@ on:
       - 'go.mod'
       - 'go.sum'
       - '.github/workflows/publish-main.yaml'
+      - '.github/scripts/required-go-ci*'
   workflow_dispatch:
 
 permissions:
@@ -25,7 +26,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  required-go-ci:
+    if: github.repository == 'EnvPlane/runner' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Gate implementation comes only from trusted main, never tag code.
+          ref: refs/heads/main
+          persist-credentials: false
+      - name: Require successful Go CI for exact trusted main SHA
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          retries: 0
+          script: |
+            const {requireGoCI} = require('./.github/scripts/required-go-ci.cjs');
+            await requireGoCI({github, context, core,
+              expectedRepository: 'EnvPlane/runner', expectedName: 'Runner CI'});
   publish:
+    needs: required-go-ci
     if: github.repository == 'EnvPlane/runner' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'))
     runs-on: ubuntu-latest
     outputs:
