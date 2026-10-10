@@ -23,6 +23,9 @@ reviewed v0.1.111 commit, module checksums and OpenAPI digest. The real network-
 verifier passed for all nine. Nine regression tests passed in each product consumer;
 moving latest and environment overrides cannot alter the accepted snapshot. Product
 CI invokes the verifier. See `docs/contracts-release-snapshot.md` for the decision.
-Publisher, dependency-update bot and exact-candidate CI gates are separate changes
-being verified together. Hosted checks for the new commits must still run after push;
+Publisher, dependency-update bot and exact-candidate CI gates were verified together:
+32 publisher tests, 13 updater tests, 176 component publisher gate tests and 17
+umbrella candidate gate tests passed. All seven product repositories passed isolated
+Go builds and complete unit suites. Workflow actionlint passed. Hosted checks for
+the new commits must still run after push;
 local passing tests are not a claim of completed hosted publication or deployment.
