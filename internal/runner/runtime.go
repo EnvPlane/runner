@@ -65,6 +65,10 @@ type runnerConfig struct {
 	FeatureEnvWriterNamespaces           []string
 	HelmAllowedChartHosts                []string
 	ReleasePlanAllowedKinds              []string
+	PVCCopyHelperImage                   string
+	PVCCopySourceNamespaces              []string
+	PVCCopyRunnerServiceAccount          string
+	PVCCopyAllowRootHelpers              bool
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -83,6 +87,10 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	cfg := runnerConfig{
+		PVCCopyHelperImage:                   strings.TrimSpace(getenv("ENVPLANE_PVC_COPY_HELPER_IMAGE", "")),
+		PVCCopySourceNamespaces:              strings.Split(getenv("ENVPLANE_PVC_COPY_SOURCE_NAMESPACES", ""), ","),
+		PVCCopyRunnerServiceAccount:          strings.TrimSpace(getenv("ENVPLANE_PVC_COPY_RUNNER_SERVICE_ACCOUNT", "")),
+		PVCCopyAllowRootHelpers:              strings.EqualFold(getenv("ENVPLANE_PVC_COPY_ALLOW_ROOT_HELPERS", "false"), "true"),
 		ControlPlaneURL:                      strings.TrimRight(getenv("ENVPLANE_CONTROL_PLANE_URL", ""), "/"),
 		ControlPlaneEndpointMode:             strings.TrimSpace(getenv("ENVPLANE_CONTROL_PLANE_ENDPOINT_MODE", "sameCluster")),
 		ControlPlaneCAFile:                   getenv("ENVPLANE_CONTROL_PLANE_CA_FILE", ""),
@@ -1061,6 +1069,16 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	}
 	var err error
 	switch command.Operation {
+	case domain.RunnerOperationMaterializePVC:
+		if err := executeRunnerPVCCopy(ctx, cfg, command, namespaceAllowed); err != nil {
+			result.ErrorCode = "pvc_copy_not_verified"
+			result.Error = "PVC copy was not verified; source preserved. Review offline fencing, source identity, helper permissions and target ownership."
+			return result
+		}
+		result.Namespace = command.Environment.Namespace
+		result.ReleaseName = ""
+		result.PVCCopyVerified = true
+		result.PVCCopyPlanDigest = command.PVCCopyPlan.Digest
 	case "cleanup_flux_namespace":
 		if strings.TrimSpace(command.Environment.ID) == "" || strings.TrimSpace(command.Environment.Namespace) != "envplane-pr-"+strings.TrimSpace(command.Environment.ID) {
 			result.ErrorCode = "cleanup_ownership_violation"
@@ -1344,6 +1362,7 @@ var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
 	},
 	"bootstrapSessionData": {
 		"manifestTemplates": {}, "manifestTemplatesSourceFingerprint": {},
+		"pvcCopySources": {},
 	},
 }
 
@@ -1489,18 +1508,21 @@ func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.C
 
 func reportRunnerHeartbeatWithEndpointPreflight(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string, preflight *domain.ManagementEndpointPreflight) error {
 	payload := domain.RunnerHeartbeatRequest{
-		ProjectID:              cfg.ProjectID,
-		ClusterID:              cfg.ClusterID,
-		RunnerID:               cfg.RunnerID,
-		DeploymentMode:         cfg.DeploymentMode,
-		RunnerNamespace:        cfg.RunnerNamespace,
-		HelmTargetNamespaces:   cfg.helmTargetNamespaces(),
-		HelmNamespaceRBACReady: len(cfg.helmTargetNamespaces()) > 0,
-		RunnerAuthToken:        cfg.RunnerAuthToken,
-		Status:                 status,
-		Error:                  errorMessage,
-		EndpointPreflight:      preflight,
-		ObservedAt:             time.Now().UTC(),
+		PVCCopyContractVersion:  pvcCopyRunnerContractVersion(cfg),
+		PVCCopySourceNamespaces: cfg.PVCCopySourceNamespaces,
+		PVCCopyHelperImage:      cfg.PVCCopyHelperImage,
+		ProjectID:               cfg.ProjectID,
+		ClusterID:               cfg.ClusterID,
+		RunnerID:                cfg.RunnerID,
+		DeploymentMode:          cfg.DeploymentMode,
+		RunnerNamespace:         cfg.RunnerNamespace,
+		HelmTargetNamespaces:    cfg.helmTargetNamespaces(),
+		HelmNamespaceRBACReady:  len(cfg.helmTargetNamespaces()) > 0,
+		RunnerAuthToken:         cfg.RunnerAuthToken,
+		Status:                  status,
+		Error:                   errorMessage,
+		EndpointPreflight:       preflight,
+		ObservedAt:              time.Now().UTC(),
 	}
 	return runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/heartbeat", "", payload, nil)
 }
