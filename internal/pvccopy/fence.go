@@ -124,7 +124,7 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 	username := "system:serviceaccount:" + runnerNamespace + ":" + runnerServiceAccount
 	common := strings.Join([]string{
 		"request.operation == 'CREATE'",
-		"request.subResource == ''",
+		"(!has(request.subResource) || request.subResource == '')",
 		"request.userInfo.username == " + strconv.Quote(username),
 		"has(object.metadata.labels) && 'app.kubernetes.io/component' in object.metadata.labels && object.metadata.labels['app.kubernetes.io/component'] == 'pvccopy-helper'",
 		"has(object.metadata.name)",
