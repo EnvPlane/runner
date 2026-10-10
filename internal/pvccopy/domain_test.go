@@ -88,6 +88,8 @@ func TestDomainAuthorityRefusalBeforeAnyTargetWrite(t *testing.T) {
 			case "production-approval":
 				d.Sources[0].EnvironmentClass = "production"
 				metadata(source)["labels"].(map[string]any)["envplane.io/environment-class"] = "production"
+				p.Items[0].SourceIdentity, _ = d.Sources[0].CanonicalIdentity()
+				p.Digest, _ = p.CanonicalDigest()
 			case "tenant":
 				d.Sources[0].TenantID = "other-tenant"
 			case "template":
@@ -133,5 +135,21 @@ func TestQuantityBounds(t *testing.T) {
 		if _, err := quantityBytes(input); err == nil {
 			t.Fatalf("unsafe quantity %q", input)
 		}
+	}
+}
+
+func TestUnknownClassRequiresExactTrustedProductionApproval(t *testing.T) {
+	d, p, f := testDomain(t)
+	d.Sources[0].EnvironmentClass = "production"
+	p.Items[0].SourceIdentity, _ = d.Sources[0].CanonicalIdentity()
+	p.Digest, _ = p.CanonicalDigest()
+	metadata(f.pvcs[p.Items[0].SourceNamespace+"/"+p.Items[0].SourceName])["labels"] = map[string]any{}
+	d.Permission.ApprovedProductionSources = []domain.PVCCopySourceRef{{Namespace: p.Items[0].SourceNamespace, Name: p.Items[0].SourceName, UID: "wrong-uid"}}
+	if _, err := d.ExecuteDomain(context.Background(), p, p.AllowedSourceNamespaces, p.Image); err == nil || f.createdPVCs != 0 {
+		t.Fatal("unknown classification copied without exact production approval")
+	}
+	d.Permission.ApprovedProductionSources[0].UID = p.Items[0].SourceUID
+	if _, err := d.ExecuteDomain(context.Background(), p, p.AllowedSourceNamespaces, p.Image); err != nil {
+		t.Fatalf("exact production approval rejected: %v", err)
 	}
 }

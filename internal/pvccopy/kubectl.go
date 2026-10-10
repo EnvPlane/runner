@@ -8,6 +8,8 @@ import (
 	"io"
 	"math"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -94,14 +96,46 @@ type pvcObject struct {
 type podObject struct {
 	Metadata objectMeta `json:"metadata"`
 	Spec     struct {
+		HostNetwork   bool   `json:"hostNetwork"`
+		HostPID       bool   `json:"hostPID"`
+		HostIPC       bool   `json:"hostIPC"`
+		RestartPolicy string `json:"restartPolicy"`
+		Deadline      int64  `json:"activeDeadlineSeconds"`
+		Security      struct {
+			RunAsUser          *int64  `json:"runAsUser"`
+			RunAsGroup         *int64  `json:"runAsGroup"`
+			RunAsNonRoot       *bool   `json:"runAsNonRoot"`
+			FSGroup            *int64  `json:"fsGroup"`
+			SupplementalGroups []int64 `json:"supplementalGroups"`
+			SELinux            any     `json:"seLinuxOptions"`
+			Seccomp            struct {
+				Type string `json:"type"`
+			} `json:"seccompProfile"`
+		} `json:"securityContext"`
 		ServiceAccount      string            `json:"serviceAccountName"`
 		Automount           *bool             `json:"automountServiceAccountToken"`
 		InitContainers      []json.RawMessage `json:"initContainers"`
 		EphemeralContainers []json.RawMessage `json:"ephemeralContainers"`
 		Containers          []struct {
-			Name         string   `json:"name"`
-			Image        string   `json:"image"`
-			Command      []string `json:"command"`
+			Name     string            `json:"name"`
+			Image    string            `json:"image"`
+			Command  []string          `json:"command"`
+			Args     []string          `json:"args"`
+			Env      []json.RawMessage `json:"env"`
+			EnvFrom  []json.RawMessage `json:"envFrom"`
+			Security struct {
+				Privileged      bool   `json:"privileged"`
+				AllowEscalation *bool  `json:"allowPrivilegeEscalation"`
+				ReadOnlyRoot    *bool  `json:"readOnlyRootFilesystem"`
+				RunAsUser       *int64 `json:"runAsUser"`
+				RunAsGroup      *int64 `json:"runAsGroup"`
+				RunAsNonRoot    *bool  `json:"runAsNonRoot"`
+				SELinux         any    `json:"seLinuxOptions"`
+				Capabilities    struct {
+					Drop []string `json:"drop"`
+					Add  []string `json:"add"`
+				} `json:"capabilities"`
+			} `json:"securityContext"`
 			VolumeMounts []struct {
 				Name              string `json:"name"`
 				Path              string `json:"mountPath"`
@@ -216,7 +250,10 @@ func (k *Kubectl) createHelper(ctx context.Context, s HelperSpec, dryRun bool) (
 	}
 	h := Helper{Namespace: response.Metadata.Namespace, Name: response.Metadata.Name, UID: response.Metadata.UID, Owner: response.Metadata.Annotations[ownerAnnotation], PVC: s.PVC, ReadOnly: s.ReadOnly, Image: s.Image}
 	if dryRun {
-		return Helper{}, nil
+		if h.Namespace != s.Namespace || h.Name != s.Name || h.Owner != s.Owner {
+			return Helper{}, ErrUnsafe
+		}
+		return Helper{}, k.validateHelperPod(response, h)
 	}
 	if h.Namespace != s.Namespace || h.Name != s.Name || h.UID == "" || h.Owner != s.Owner {
 		return Helper{}, fmt.Errorf("%w: helper create identity mismatch", ErrUnsafe)
@@ -259,6 +296,30 @@ func (k *Kubectl) validateHelperPod(obj podObject, h Helper) error {
 	}
 	c := s.Containers[0]
 	v := s.Volumes[0]
+	uid, nonRoot := int64(10001), true
+	var caps []string
+	if k.AllowRootHelpers {
+		uid, nonRoot = 0, false
+		caps = []string{"DAC_OVERRIDE"}
+		if !h.ReadOnly {
+			caps = append(caps, "CHOWN", "FOWNER")
+		}
+	}
+	security := s.Security
+	if security.RunAsUser == nil || *security.RunAsUser != uid || security.RunAsGroup == nil || *security.RunAsGroup != uid || security.RunAsNonRoot == nil || *security.RunAsNonRoot != nonRoot || security.FSGroup != nil || len(security.SupplementalGroups) != 0 || security.SELinux != nil || security.Seccomp.Type != "RuntimeDefault" || s.HostNetwork || s.HostPID || s.HostIPC || s.RestartPolicy != "Never" {
+		return fmt.Errorf("%w: mutated helper pod security", ErrUnsafe)
+	}
+	cs := c.Security
+	if cs.Privileged || cs.AllowEscalation == nil || *cs.AllowEscalation || cs.ReadOnlyRoot == nil || !*cs.ReadOnlyRoot || cs.RunAsUser != nil || cs.RunAsGroup != nil || cs.RunAsNonRoot != nil || cs.SELinux != nil || !slices.Equal(cs.Capabilities.Drop, []string{"ALL"}) || !slices.Equal(cs.Capabilities.Add, caps) || len(c.Env) != 0 || len(c.EnvFrom) != 0 {
+		return fmt.Errorf("%w: mutated helper container security", ErrUnsafe)
+	}
+	if len(c.Args) != 1 || s.Deadline <= 0 || s.Deadline > int64(MaxCopyTimeout/time.Second)+30 {
+		return ErrUnsafe
+	}
+	seconds, err := strconv.ParseInt(c.Args[0], 10, 64)
+	if err != nil || seconds != s.Deadline {
+		return ErrUnsafe
+	}
 	if c.Name != "copy" || c.Image != h.Image || len(c.Command) != 1 || c.Command[0] != "sleep" || len(c.VolumeMounts) != 1 || v.Name != "data" || v.PVC == nil || v.PVC.ClaimName != h.PVC.Name || v.PVC.ReadOnly != h.ReadOnly {
 		return ErrUnsafe
 	}

@@ -70,6 +70,13 @@ The Pod command explicitly overrides ENTRYPOINT with bounded `sleep`.
    UID precondition through raw DELETE. No PVC, workload, source file or RBAC
    cleanup occurs. Failed cleanup/unknown creates require operator attention.
 
+Create/dry-run responses and pre-exec readback are checked against helper mount,
+identity, UID/GID/root opt-in, caps, seccomp, no-fsGroup/SELinux overrides, host
+namespace, sidecar, token and deadline settings. Known UID-owned helpers can be
+cleaned even if admission changed their shape. The source admission fence must
+reject fsGroup/SELinux mutations before scheduling: readback alone cannot stop
+kubelet already processing an incorrectly admitted Pod.
+
 ## Explicit deployment limitations
 
 No observation is an atomic scheduling fence. The annotation is an owner

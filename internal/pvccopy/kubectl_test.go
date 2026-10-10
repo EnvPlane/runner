@@ -27,6 +27,7 @@ type fakeCluster struct {
 	createdPods                                                                       []map[string]any
 	createdPVCs, deletedPods, exports                                                 int
 	failPods, denyControllers, blockExport, wrongReceipt, changeSource, replaceHelper bool
+	mutateHelper                                                                      string
 }
 
 func valueArg(args []string, flag string) string {
@@ -156,6 +157,32 @@ func (f *fakeCluster) Run(ctx context.Context, args []string, input io.Reader, o
 			}
 			if slices.Contains(args, "--dry-run=server") {
 				return respond(obj)
+			}
+			spec := obj["spec"].(map[string]any)
+			container := spec["containers"].([]any)[0].(map[string]any)
+			switch f.mutateHelper {
+			case "fsGroup":
+				spec["securityContext"].(map[string]any)["fsGroup"] = float64(10001)
+			case "selinux":
+				spec["securityContext"].(map[string]any)["seLinuxOptions"] = map[string]any{"level": "s0"}
+			case "capabilities":
+				container["securityContext"].(map[string]any)["capabilities"] = map[string]any{"drop": []string{"ALL"}, "add": []string{"SYS_ADMIN"}}
+			case "privilege":
+				container["securityContext"].(map[string]any)["allowPrivilegeEscalation"] = true
+			case "root":
+				spec["securityContext"].(map[string]any)["runAsUser"] = float64(0)
+			case "hostPID":
+				spec["hostPID"] = true
+			case "image":
+				container["image"] = "other:latest"
+			case "token":
+				spec["automountServiceAccountToken"] = true
+			case "writable":
+				container["volumeMounts"].([]any)[0].(map[string]any)["readOnly"] = false
+			case "sidecar":
+				spec["containers"] = append(spec["containers"].([]any), map[string]any{"name": "sidecar", "image": "other"})
+			case "deadline":
+				spec["activeDeadlineSeconds"] = float64(0)
 			}
 			key := ns + "/" + metadata(obj)["name"].(string)
 			if f.pods[key] != nil {
@@ -362,5 +389,28 @@ func TestControllerFence(t *testing.T) {
 	obj["spec"].(map[string]any)["replicas"] = nil
 	if controllerSafe(obj, ref) == nil {
 		t.Fatal("unknown replicas allowed")
+	}
+}
+
+func TestAdmissionMutationsRefusedAndKnownUIDCleaned(t *testing.T) {
+	for _, kind := range []string{"fsGroup", "selinux", "capabilities", "privilege", "root", "hostPID", "image", "token", "writable", "sidecar", "deadline"} {
+		t.Run(kind, func(t *testing.T) {
+			p := testPlan()
+			f := newFake(t, p)
+			f.mutateHelper = kind
+			e := testExecutor(f, p)
+			if kind == "root" {
+				e.Transport.(*Kubectl).AllowRootHelpers = false
+			}
+			if _, err := e.Execute(context.Background(), p); err == nil {
+				t.Fatal("admitted mutation accepted")
+			}
+			if f.exports != 0 || f.deletedPods != 1 || len(f.pods) != 0 {
+				t.Fatalf("unexpected exec/cleanup: exports %d deleted %d left %d", f.exports, f.deletedPods, len(f.pods))
+			}
+			if _, err := os.Stat(filepath.Join(f.target, StateDirectory)); !os.IsNotExist(err) {
+				t.Fatal("admission error claimed target")
+			}
+		})
 	}
 }

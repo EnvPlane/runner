@@ -70,7 +70,10 @@ func controllerSafe(obj map[string]any, ref PVCRef) error {
 	case "Job":
 		safe = spec["suspend"] == true && zero(status, "active", 0)
 	case "CronJob":
-		active, _ := status["active"].([]any)
+		active, ok := status["active"].([]any)
+		if _, exists := status["active"]; exists && !ok {
+			return ErrUnsafe
+		}
 		safe = spec["suspend"] == true && len(active) == 0
 	case "DaemonSet":
 		safe = false
