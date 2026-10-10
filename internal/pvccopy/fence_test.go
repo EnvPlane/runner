@@ -104,8 +104,16 @@ func (f *fenceTestCommands) RunAdmissionFenceProbe(ctx context.Context, args []s
 	}
 	spec := pod["spec"].(map[string]any)
 	volume := spec["volumes"].([]any)[0].(map[string]any)["persistentVolumeClaim"].(map[string]any)
-	if volume["readOnly"] != false || spec["automountServiceAccountToken"] != false || spec["serviceAccountName"] != "default" {
-		f.t.Fatal("probe must be writable but tokenless")
+	security := spec["securityContext"].(map[string]any)
+	container := spec["containers"].([]any)[0].(map[string]any)
+	mount := container["volumeMounts"].([]any)[0].(map[string]any)
+	if spec["automountServiceAccountToken"] != false || spec["serviceAccountName"] != "default" || mount["readOnly"] != volume["readOnly"] {
+		f.t.Fatal("probe must be tokenless with consistent volume/mount flags")
+	}
+	if volume["readOnly"] == true {
+		if mount["recursiveReadOnly"] != "Enabled" || (security["fsGroup"] == nil && security["seLinuxOptions"] == nil) {
+			f.t.Fatal("read-only negative probe lacks the metadata injection")
+		}
 	}
 	f.probes++
 	if f.probe != nil {
@@ -195,7 +203,7 @@ func TestRequireAdmissionFencePassesOnlyCanonicalEnforcedPolicy(t *testing.T) {
 	if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); err != nil {
 		t.Fatal(err)
 	}
-	if f.reads != 2 || f.probes != len(p.Items) {
+	if f.reads != 2 || f.probes != 3*len(p.Items) {
 		t.Fatalf("missing metadata reads/source probes: %d/%d", f.reads, f.probes)
 	}
 }
@@ -294,7 +302,7 @@ func TestAdmissionFenceNegativeProbeEvidence(t *testing.T) {
 				case "canceled":
 					cancel()
 				case "second source unfenced":
-					if f.probes == 2 {
+					if f.probes == 4 {
 						return nil
 					}
 				}
@@ -413,7 +421,7 @@ func TestFenceSourceAuthorityReusedAcrossFeaturePlans(t *testing.T) {
 				t.Fatal("feature change altered source fence specification, annotation or denial message")
 			}
 			f := &fenceTestCommands{t: t, policy: policy, binding: binding}
-			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); err != nil || f.probes != len(p.Items) {
+			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); err != nil || f.probes != 3*len(p.Items) {
 				t.Fatalf("previously provisioned source fence not reusable/enforcement not reprobed: %v", err)
 			}
 		})
@@ -525,5 +533,129 @@ func TestFenceRenderingRejectsInvalidSourceAuthority(t *testing.T) {
 				t.Fatal("unsafe source authority accepted by policy renderer")
 			}
 		})
+	}
+}
+
+func TestFencePreSchedulingSecurityGuardsAndWeakenedPolicyDrift(t *testing.T) {
+	// Each clause must appear in BOTH source-consumer exceptions and every
+	// Runner/source-namespace CREATE exception, not only in a documentation
+	// annotation or the post-create worker readback.
+	guards := []string{
+		"has(object.spec.securityContext)",
+		"!has(object.spec.securityContext.fsGroup)",
+		"!has(object.spec.securityContext.fsGroupChangePolicy)",
+		"!has(object.spec.securityContext.supplementalGroups)",
+		"!has(object.spec.securityContext.supplementalGroupsPolicy)",
+		"!has(object.spec.securityContext.seLinuxOptions)",
+		"!has(object.spec.securityContext.seLinuxChangePolicy)",
+		"!has(object.spec.securityContext.sysctls)",
+		"!has(object.spec.securityContext.windowsOptions)",
+		"!has(object.spec.securityContext.appArmorProfile)",
+		"object.spec.securityContext.seccompProfile.type == 'RuntimeDefault'",
+		"!has(object.spec.securityContext.seccompProfile.localhostProfile)",
+		"(object.spec.securityContext.runAsUser == 0 && object.spec.securityContext.runAsGroup == 0 && object.spec.securityContext.runAsNonRoot == false)",
+		"(object.spec.securityContext.runAsUser == 10001 && object.spec.securityContext.runAsGroup == 10001 && object.spec.securityContext.runAsNonRoot == true)",
+		"!has(object.spec.containers[0].securityContext.seLinuxOptions)",
+		"!has(object.spec.containers[0].securityContext.runAsUser)",
+		"!has(object.spec.containers[0].securityContext.runAsGroup)",
+		"!has(object.spec.containers[0].securityContext.runAsNonRoot)",
+		"!has(object.spec.containers[0].securityContext.seccompProfile)",
+		"!has(object.spec.containers[0].securityContext.appArmorProfile)",
+		"!has(object.spec.containers[0].securityContext.procMount)",
+		"!has(object.spec.containers[0].securityContext.windowsOptions)",
+		"object.spec.containers[0].securityContext.capabilities.drop == ['ALL']",
+		"object.spec.containers[0].securityContext.capabilities.add == ['DAC_OVERRIDE']",
+		"size(object.spec.containers[0].securityContext.capabilities.add) == 0",
+		"k != 'seccomp.security.alpha.kubernetes.io/pod'",
+		"!k.startsWith('container.seccomp.security.alpha.kubernetes.io/')",
+		"!k.startsWith('container.apparmor.security.beta.kubernetes.io/')",
+		"object.spec.activeDeadlineSeconds >= 31",
+		"object.spec.activeDeadlineSeconds <= 21630",
+		"object.spec.terminationGracePeriodSeconds == 5",
+		"object.spec.containers[0].command == ['sleep']",
+		"size(object.spec.containers[0].args) == 1",
+		"object.spec.containers[0].args[0].matches('^[0-9]{1,6}$')",
+		"int(object.spec.containers[0].args[0]) == object.spec.activeDeadlineSeconds",
+		"!has(object.spec.containers[0].workingDir)",
+		"object.spec.containers[0].terminationMessagePath == '/dev/termination-log'",
+		"!has(object.spec.containers[0].lifecycle)",
+		"!has(object.spec.containers[0].livenessProbe)",
+		"!has(object.spec.containers[0].readinessProbe)",
+		"!has(object.spec.containers[0].startupProbe)",
+	}
+	for _, guard := range guards {
+		t.Run(guard, func(t *testing.T) {
+			p := fenceTestPlan(t)
+			policy, binding := fenceTestObjects(t, p)
+			for _, value := range policy["spec"].(map[string]any)["validations"].([]any) {
+				validation := value.(map[string]any)
+				expression := validation["expression"].(string)
+				if !strings.Contains(expression, guard) {
+					t.Fatalf("missing admission-time guard %q", guard)
+				}
+				validation["expression"] = strings.ReplaceAll(expression, guard, "true")
+			}
+			// Same source-bound names, annotation and accepted generation cannot
+			// certify the weaker policy; refuse before any probe/create request.
+			f := &fenceTestCommands{t: t, policy: policy, binding: binding}
+			if err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner"); !errors.Is(err, ErrUnsafe) || f.probes != 0 {
+				t.Fatalf("weakened metadata/security fence accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestFenceInjectionDenialProofIsRequiredBeforeScheduling(t *testing.T) {
+	for _, injection := range []string{"fsGroup", "seLinuxOptions"} {
+		for _, mode := range []string{"exact fence denial", "admitted", "unrelated denial"} {
+			t.Run(injection+"/"+mode, func(t *testing.T) {
+				p := fenceTestPlan(t)
+				policy, binding := fenceTestObjects(t, p)
+				f := &fenceTestCommands{t: t, policy: policy, binding: binding}
+				injectionsSeen := 0
+				f.probe = func(_ context.Context, args []string, pod map[string]any, out io.Writer) error {
+					spec := pod["spec"].(map[string]any)
+					security := spec["securityContext"].(map[string]any)
+					volume := spec["volumes"].([]any)[0].(map[string]any)["persistentVolumeClaim"].(map[string]any)
+					if security[injection] != nil {
+						injectionsSeen++
+						if volume["readOnly"] != true || security["runAsUser"] != float64(10001) || security["runAsGroup"] != float64(10001) || security["runAsNonRoot"] != true || security["seccompProfile"].(map[string]any)["type"] != "RuntimeDefault" {
+							t.Fatal("metadata proof must target an otherwise allowed read-only helper")
+						}
+						found := false
+						for _, item := range p.Items {
+							if item.SourceNamespace == args[5] && item.SourceName == volume["claimName"] {
+								found = true
+								if pod["metadata"].(map[string]any)["name"] != SourceHelperName(PVCRef{Namespace: item.SourceNamespace, Name: item.SourceName, UID: item.SourceUID}) {
+									t.Fatal("injection proof did not use the exact authorized source helper name")
+								}
+							}
+						}
+						if !found {
+							t.Fatal("injection proof references an unselected source")
+						}
+						if mode == "admitted" {
+							return nil
+						}
+						if mode == "unrelated denial" {
+							_, _ = io.WriteString(out, "PodSecurity forbidden: private metadata")
+							return errors.New("private stderr")
+						}
+					}
+					name := policy["metadata"].(map[string]any)["name"].(string)
+					digest := policy["metadata"].(map[string]any)["annotations"].(map[string]any)[fenceDigestAnnotation].(string)
+					_, _ = io.WriteString(out, "ValidatingAdmissionPolicy '"+name+"' with binding '"+name+"' denied request: "+fenceMessage(digest))
+					return errors.New("exit status 1")
+				}
+				err := (&Kubectl{Commands: f}).RequireAdmissionFence(context.Background(), p, "runner-ns", "runtime-runner")
+				if mode == "exact fence denial" {
+					if err != nil || injectionsSeen != len(p.Items) || f.probes != 3*len(p.Items) {
+						t.Fatalf("missing metadata denial evidence: %v", err)
+					}
+				} else if !errors.Is(err, ErrUnsafe) || injectionsSeen != 1 || strings.Contains(err.Error(), "private") {
+					t.Fatalf("missing/unrelated metadata denial falsely proved fence: %v", err)
+				}
+			})
+		}
 	}
 }

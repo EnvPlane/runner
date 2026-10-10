@@ -130,7 +130,24 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 		"has(object.metadata.name)",
 		"has(object.spec.serviceAccountName) && object.spec.serviceAccountName == 'default'",
 		"has(object.spec.automountServiceAccountToken) && object.spec.automountServiceAccountToken == false",
+		// Kubelet applies volume ownership/relabeling before a helper readback
+		// can run. Reject metadata-changing contexts in admission, not after
+		// scheduling; a read-only container mount is not sufficient protection.
+		"has(object.spec.securityContext)",
+		"!has(object.spec.securityContext.fsGroup) && !has(object.spec.securityContext.fsGroupChangePolicy)",
+		"!has(object.spec.securityContext.supplementalGroups) && !has(object.spec.securityContext.supplementalGroupsPolicy)",
+		"!has(object.spec.securityContext.seLinuxOptions) && !has(object.spec.securityContext.seLinuxChangePolicy)",
+		"!has(object.spec.securityContext.sysctls) && !has(object.spec.securityContext.windowsOptions)",
+		"!has(object.spec.securityContext.appArmorProfile)",
+		"has(object.spec.securityContext.seccompProfile) && object.spec.securityContext.seccompProfile.type == 'RuntimeDefault' && !has(object.spec.securityContext.seccompProfile.localhostProfile)",
+		"has(object.spec.securityContext.runAsUser) && has(object.spec.securityContext.runAsGroup) && has(object.spec.securityContext.runAsNonRoot)",
+		"((object.spec.securityContext.runAsUser == 0 && object.spec.securityContext.runAsGroup == 0 && object.spec.securityContext.runAsNonRoot == false) || (object.spec.securityContext.runAsUser == 10001 && object.spec.securityContext.runAsGroup == 10001 && object.spec.securityContext.runAsNonRoot == true))",
+		// Old profile annotations must not bypass the explicit seccomp and
+		// AppArmor schema. Reject them even when a webhook injects them.
+		"(!has(object.metadata.annotations) || object.metadata.annotations.all(k, k != 'seccomp.security.alpha.kubernetes.io/pod' && !k.startsWith('container.seccomp.security.alpha.kubernetes.io/') && !k.startsWith('container.apparmor.security.beta.kubernetes.io/')))",
 		"object.spec.restartPolicy == 'Never'",
+		"has(object.spec.activeDeadlineSeconds) && object.spec.activeDeadlineSeconds >= 31 && object.spec.activeDeadlineSeconds <= " + strconv.FormatInt(int64(MaxCopyTimeout/time.Second)+30, 10),
+		"object.spec.terminationGracePeriodSeconds == 5",
 		"(!has(object.spec.hostNetwork) || object.spec.hostNetwork == false)",
 		"(!has(object.spec.hostPID) || object.spec.hostPID == false)",
 		"(!has(object.spec.hostIPC) || object.spec.hostIPC == false)",
@@ -140,15 +157,22 @@ func FenceManifests(plan domain.PVCCopyPlan, runnerNamespace, runnerServiceAccou
 		"object.spec.containers[0].name == 'copy'",
 		"object.spec.containers[0].image == " + strconv.Quote(plan.Image),
 		"has(object.spec.containers[0].command) && object.spec.containers[0].command == ['sleep']",
+		"has(object.spec.containers[0].args) && size(object.spec.containers[0].args) == 1 && object.spec.containers[0].args[0].matches('^[0-9]{1,6}$') && int(object.spec.containers[0].args[0]) == object.spec.activeDeadlineSeconds",
+		"!has(object.spec.containers[0].workingDir)",
+		"(!has(object.spec.containers[0].terminationMessagePath) || object.spec.containers[0].terminationMessagePath == '/dev/termination-log')",
 		"(!has(object.spec.containers[0].env) || size(object.spec.containers[0].env) == 0)",
 		"(!has(object.spec.containers[0].envFrom) || size(object.spec.containers[0].envFrom) == 0)",
 		"!has(object.spec.containers[0].lifecycle)",
 		"!has(object.spec.containers[0].livenessProbe) && !has(object.spec.containers[0].readinessProbe) && !has(object.spec.containers[0].startupProbe)",
 		"has(object.spec.containers[0].securityContext)",
+		"!has(object.spec.containers[0].securityContext.seLinuxOptions)",
+		"!has(object.spec.containers[0].securityContext.runAsUser) && !has(object.spec.containers[0].securityContext.runAsGroup) && !has(object.spec.containers[0].securityContext.runAsNonRoot)",
+		"!has(object.spec.containers[0].securityContext.seccompProfile) && !has(object.spec.containers[0].securityContext.appArmorProfile)",
+		"!has(object.spec.containers[0].securityContext.procMount) && !has(object.spec.containers[0].securityContext.windowsOptions)",
 		"(!has(object.spec.containers[0].securityContext.privileged) || object.spec.containers[0].securityContext.privileged == false)",
 		"object.spec.containers[0].securityContext.allowPrivilegeEscalation == false && object.spec.containers[0].securityContext.readOnlyRootFilesystem == true",
 		"has(object.spec.containers[0].securityContext.capabilities) && object.spec.containers[0].securityContext.capabilities.drop == ['ALL']",
-		"(!has(object.spec.containers[0].securityContext.capabilities.add) || object.spec.containers[0].securityContext.capabilities.add.all(c, c == 'DAC_OVERRIDE'))",
+		"((object.spec.securityContext.runAsUser == 0 && has(object.spec.containers[0].securityContext.capabilities.add) && object.spec.containers[0].securityContext.capabilities.add == ['DAC_OVERRIDE']) || (object.spec.securityContext.runAsUser == 10001 && (!has(object.spec.containers[0].securityContext.capabilities.add) || size(object.spec.containers[0].securityContext.capabilities.add) == 0)))",
 		"size(object.spec.volumes) == 1 && object.spec.volumes[0].name == 'data'",
 		"has(object.spec.volumes[0].persistentVolumeClaim) && has(object.spec.volumes[0].persistentVolumeClaim.readOnly) && object.spec.volumes[0].persistentVolumeClaim.readOnly == true",
 		"has(object.spec.containers[0].volumeMounts) && size(object.spec.containers[0].volumeMounts) == 1",
@@ -245,6 +269,7 @@ type fenceObject struct {
 
 // RequireAdmissionFence reads only the exact generated policy and binding.
 // Negative server-side dry-runs prove enforcement for each source at this instant,
+// including rejection of read-only helpers with volume metadata injections,
 // not that an administrator cannot delete the policy afterward. The owner must
 // hold it installed; the parent must recheck at every validation stage, and its
 // positive helper preflight must independently prove helper admission/RBAC.
@@ -328,54 +353,69 @@ func (b *fenceProbeOutput) Write(p []byte) (int, error) {
 func (k *Kubectl) probeAdmissionFence(ctx context.Context, plan domain.PVCCopyPlan, name, digest string) error {
 	expected := fmt.Sprintf("ValidatingAdmissionPolicy '%s' with binding '%s' denied request: %s", name, name, fenceMessage(digest))
 	for _, item := range plan.Items {
-		// A deliberately writable consumer cannot satisfy the helper exception.
-		// No digest message or policy name is included in the submitted object,
-		// so an echoed request body cannot be mistaken for denial evidence.
-		pod := map[string]any{
-			"apiVersion": "v1", "kind": "Pod",
-			"metadata": map[string]any{"name": "pvccopy-fence-probe", "namespace": item.SourceNamespace},
-			"spec": map[string]any{
-				"serviceAccountName": "default", "automountServiceAccountToken": false, "restartPolicy": "Never",
-				"securityContext": map[string]any{"runAsNonRoot": true, "runAsUser": 10001, "runAsGroup": 10001, "seccompProfile": map[string]any{"type": "RuntimeDefault"}},
-				"containers": []any{map[string]any{"name": "copy", "image": plan.Image, "command": []string{"sleep"}, "args": []string{"1"},
-					"securityContext": map[string]any{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": map[string]any{"drop": []string{"ALL"}}},
-					"resources":       map[string]any{"requests": map[string]string{"cpu": "10m", "memory": "32Mi"}, "limits": map[string]string{"cpu": "1", "memory": "256Mi"}},
-					"volumeMounts":    []any{map[string]any{"name": "data", "mountPath": "/data", "readOnly": false}}}},
-				"volumes": []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": item.SourceName, "readOnly": false}}},
-			},
-		}
-		input, err := json.Marshal(pod)
-		if err != nil {
-			return fmt.Errorf("%w: admission fence probe encoding failed", ErrUnsafe)
-		}
-		args := []string{"create", "--dry-run=server", "-f", "-", "-n", item.SourceNamespace, "-o", "json", "--request-timeout=20s"}
-		probeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-		var output fenceProbeOutput
-		if k.Commands != nil {
-			probe, ok := k.Commands.(AdmissionFenceProbeRunner)
-			if !ok {
-				cancel()
-				return fmt.Errorf("%w: admission fence probe transport unavailable", ErrUnsafe)
+		for _, probeKind := range []string{"writable", "fsGroup", "seLinux"} {
+			// Probe the exact helper identity/schema except for one unsafe field.
+			// This tests injection defenses before scheduling, not just RW denial.
+			// No digest message or policy name is included in the submitted object,
+			// so an echoed request body cannot be mistaken for denial evidence.
+			readOnly := probeKind != "writable"
+			mount := map[string]any{"name": "data", "mountPath": "/data", "readOnly": readOnly}
+			if readOnly {
+				mount["recursiveReadOnly"] = "Enabled"
 			}
-			err = probe.RunAdmissionFenceProbe(probeCtx, args, bytes.NewReader(input), &output)
-		} else {
-			cmd := exec.CommandContext(probeCtx, "kubectl", args...)
-			cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(input), io.Discard, &output
-			cmd.WaitDelay = 2 * time.Second
-			err = cmd.Run()
-		}
-		canceled := probeCtx.Err() != nil
-		cancel()
-		denied := false
-		for _, line := range strings.Split(output.String(), "\n") {
-			// Upstream emits this exact policy/binding denial segment. Require
-			// its fixed digest message at line end, not arbitrary name substrings.
-			if strings.HasSuffix(strings.TrimSpace(line), expected) {
-				denied = true
+			pod := map[string]any{
+				"apiVersion": "v1", "kind": "Pod",
+				"metadata": map[string]any{"name": SourceHelperName(PVCRef{Namespace: item.SourceNamespace, Name: item.SourceName, UID: item.SourceUID}), "namespace": item.SourceNamespace, "labels": map[string]any{"app.kubernetes.io/component": "pvccopy-helper"}},
+				"spec": map[string]any{
+					"serviceAccountName": "default", "automountServiceAccountToken": false, "restartPolicy": "Never", "activeDeadlineSeconds": 60, "terminationGracePeriodSeconds": 5,
+					"securityContext": map[string]any{"runAsNonRoot": true, "runAsUser": 10001, "runAsGroup": 10001, "seccompProfile": map[string]any{"type": "RuntimeDefault"}},
+					"containers": []any{map[string]any{"name": "copy", "image": plan.Image, "command": []string{"sleep"}, "args": []string{"60"},
+						"securityContext": map[string]any{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": map[string]any{"drop": []string{"ALL"}}},
+						"resources":       map[string]any{"requests": map[string]string{"cpu": "10m", "memory": "32Mi"}, "limits": map[string]string{"cpu": "1", "memory": "256Mi"}},
+						"volumeMounts":    []any{mount}}},
+					"volumes": []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": item.SourceName, "readOnly": readOnly}}},
+				},
 			}
-		}
-		if err == nil || canceled || output.overflow || !denied {
-			return fmt.Errorf("%w: source admission fence enforcement not proven", ErrUnsafe)
+			security := pod["spec"].(map[string]any)["securityContext"].(map[string]any)
+			switch probeKind {
+			case "fsGroup":
+				security["fsGroup"] = 10001
+			case "seLinux":
+				security["seLinuxOptions"] = map[string]any{"type": "container_t"}
+			}
+			input, err := json.Marshal(pod)
+			if err != nil {
+				return fmt.Errorf("%w: admission fence probe encoding failed", ErrUnsafe)
+			}
+			args := []string{"create", "--dry-run=server", "-f", "-", "-n", item.SourceNamespace, "-o", "json", "--request-timeout=20s"}
+			probeCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
+			var output fenceProbeOutput
+			if k.Commands != nil {
+				probe, ok := k.Commands.(AdmissionFenceProbeRunner)
+				if !ok {
+					cancel()
+					return fmt.Errorf("%w: admission fence probe transport unavailable", ErrUnsafe)
+				}
+				err = probe.RunAdmissionFenceProbe(probeCtx, args, bytes.NewReader(input), &output)
+			} else {
+				cmd := exec.CommandContext(probeCtx, "kubectl", args...)
+				cmd.Stdin, cmd.Stdout, cmd.Stderr = bytes.NewReader(input), io.Discard, &output
+				cmd.WaitDelay = 2 * time.Second
+				err = cmd.Run()
+			}
+			canceled := probeCtx.Err() != nil
+			cancel()
+			denied := false
+			for _, line := range strings.Split(output.String(), "\n") {
+				// Upstream emits this exact policy/binding denial segment. Require
+				// its fixed digest message at line end, not arbitrary name substrings.
+				if strings.HasSuffix(strings.TrimSpace(line), expected) {
+					denied = true
+				}
+			}
+			if err == nil || canceled || output.overflow || !denied {
+				return fmt.Errorf("%w: source admission fence enforcement not proven", ErrUnsafe)
+			}
 		}
 	}
 	return nil
