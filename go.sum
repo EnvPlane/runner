@@ -6,6 +6,8 @@ github.com/envplane/contracts v0.1.109 h1:kGbfcbeSfbdV6G4hPf5yN8iJl8Kay16wBZeIpV
 github.com/envplane/contracts v0.1.109/go.mod h1:KYR62hqF41fqGSuAPOU9clbDhk1GsmcemCGlJ6RBmpQ=
 github.com/envplane/contracts v0.1.110 h1:hZBmg/Jf8EF0ATB/MjXwxaqjcK+gnfQFb4eV8EQb41A=
 github.com/envplane/contracts v0.1.110/go.mod h1:KYR62hqF41fqGSuAPOU9clbDhk1GsmcemCGlJ6RBmpQ=
+github.com/envplane/contracts v0.1.111 h1:Yjqr1gv7dPBTiNCoi85XFYOFYDVo0TnliZRAK+07seo=
+github.com/envplane/contracts v0.1.111/go.mod h1:KYR62hqF41fqGSuAPOU9clbDhk1GsmcemCGlJ6RBmpQ=
 github.com/envplane/gitops v0.1.4 h1:c1BnLsQ1ePtV6BvYXP+OEs7Ue9bOLd+UUJ4xKKenwk8=
 github.com/envplane/gitops v0.1.4/go.mod h1:3Kb4H8p5npnPhKLTNIVudCpJeAAndWieH+UmhhWGBrA=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
