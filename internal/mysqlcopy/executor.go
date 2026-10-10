@@ -95,6 +95,9 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	if subtle.ConstantTimeCompare(credentials.Target[:], credentials.TargetRoot[:]) == 1 || subtle.ConstantTimeCompare(credentials.Source[:], credentials.TargetRoot[:]) == 1 {
 		return Receipt{}, ErrUnsafe
 	}
+	if p.DDLMode == "backup_lock" && (subtle.ConstantTimeCompare(credentials.Backup[:], credentials.Target[:]) == 1 || subtle.ConstantTimeCompare(credentials.Backup[:], credentials.TargetRoot[:]) == 1) {
+		return Receipt{}, ErrUnsafe
+	}
 	source, err := e.Transport.Source(ctx, p)
 	if err != nil {
 		return Receipt{}, safeError(ctx, err)

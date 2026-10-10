@@ -111,7 +111,8 @@ func (d *NativeDriver) probeAdmission(ctx context.Context, p Plan, ref Admission
 	args := []string{"create", "--dry-run=server", "-f", "-", "-n", p.Source.PVC.Namespace, "-o", "json", "--request-timeout=15s"}
 	// Positive admission proves the intended helper is actually permitted. This
 	// does not create/schedule a Pod or read a Secret/PVC through a mount.
-	if _, err := d.json(ctx, args, pod); err != nil {
+	positive, err := d.json(ctx, args, pod)
+	if err != nil || !podMatches(asMap(pod["spec"]), asMap(positive["spec"])) {
 		return ErrUnsafe
 	}
 	for _, kind := range []string{"secret", "pvc"} {

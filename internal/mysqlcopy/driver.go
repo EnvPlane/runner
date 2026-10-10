@@ -182,6 +182,13 @@ func (d *NativeDriver) sourceReadback(ctx context.Context, p Plan) (string, erro
 	if container == nil || str(container, "image") == "" {
 		return "", ErrUnsafe
 	}
+	effectiveUID := nested(container, "securityContext", "runAsUser")
+	if effectiveUID == nil {
+		effectiveUID = nested(pod, "spec", "securityContext", "runAsUser")
+	}
+	if effectiveUID != nil && effectiveUID != float64(0) && effectiveUID != float64(999) {
+		return "", ErrUnsafe
+	}
 	declared := str(container, "image")
 	if d.declaredSourceImage != "" && d.declaredSourceImage != declared {
 		return "", ErrUnsafe

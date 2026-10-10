@@ -172,6 +172,10 @@ func (k *fakeKube) Run(ctx context.Context, args []string, in io.Reader, out io.
 			return ErrUnsafe
 		}
 		cmd := args[i+1:]
+		if cmd[0] == "id" {
+			_, err := io.WriteString(out, "999\n")
+			return err
+		}
 		if cmd[0] == "kill" {
 			k.mu.Lock()
 			defer k.mu.Unlock()

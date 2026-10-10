@@ -219,3 +219,15 @@ func TestPlanAuthorityMetadata(t *testing.T) {
 		}
 	}
 }
+func TestLifecycleDigestCanonicalUTC(t *testing.T) {
+	p := testPlan()
+	a, err := p.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.EnvironmentCreatedAt = p.EnvironmentCreatedAt.In(time.FixedZone("fixture-offset", 7200))
+	b, err := p.Digest()
+	if err != nil || a != b {
+		t.Fatal("lifecycle timezone changed immutable receipt binding")
+	}
+}

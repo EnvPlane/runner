@@ -143,6 +143,7 @@ func (p Plan) Digest() (string, error) {
 	if err := p.Validate(); err != nil {
 		return "", err
 	}
+	p.EnvironmentCreatedAt = p.EnvironmentCreatedAt.UTC()
 	b, err := json.Marshal(p)
 	if err != nil {
 		return "", err

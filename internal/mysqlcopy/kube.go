@@ -209,6 +209,12 @@ func (k *KubeTransport) Source(ctx context.Context, p Plan) (SourceIdentity, err
 		return SourceIdentity{}, ErrUnsafe
 	}
 	k.source = ep
+	for _, field := range []string{"-u", "-g"} {
+		b := &limitBuffer{max: 1024}
+		if err := k.exec(ctx, p, k.source, false, []string{"id", field, "mysql"}, nil, b); err != nil || strings.TrimSpace(b.String()) != "999" {
+			return SourceIdentity{}, ErrUnsafe
+		}
+	}
 	identity, err := k.query(ctx, p, "SELECT @@server_uuid, VERSION();\n")
 	if err != nil {
 		return SourceIdentity{}, err
