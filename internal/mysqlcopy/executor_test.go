@@ -231,3 +231,18 @@ func TestLifecycleDigestCanonicalUTC(t *testing.T) {
 		t.Fatal("lifecycle timezone changed immutable receipt binding")
 	}
 }
+func TestTLSServiceHostnameNotExternalPrefix(t *testing.T) {
+	p := testPlan()
+	for _, host := range []string{"mysql.source.svc", "mysql.source.svc.cluster.local"} {
+		p.Source.TLSServerName = host
+		if p.Validate() != nil {
+			t.Fatal("internal service hostname refused")
+		}
+	}
+	for _, host := range []string{"mysql.source.svc.attacker.example", "mysql.source.svc.cluster.local.attacker.example", "mysql.source.svc.custom-domain"} {
+		p.Source.TLSServerName = host
+		if p.Validate() == nil {
+			t.Fatal("external prefix-suffix hostname accepted")
+		}
+	}
+}

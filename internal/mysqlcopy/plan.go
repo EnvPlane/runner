@@ -107,7 +107,7 @@ func (p Plan) Validate() error {
 		return ErrUnsafe
 	}
 	dns := p.Source.Service + "." + p.Source.PVC.Namespace + ".svc"
-	if p.Source.TLSServerName != dns && (!strings.HasPrefix(p.Source.TLSServerName, dns+".") || !name.MatchString(p.Source.TLSServerName)) {
+	if p.Source.TLSServerName != dns && p.Source.TLSServerName != dns+".cluster.local" {
 		return ErrUnsafe
 	}
 	if strings.EqualFold(p.Source.Credentials.Username, "root") || strings.EqualFold(p.Target.Credentials.Username, "root") {
