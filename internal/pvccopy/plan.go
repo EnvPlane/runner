@@ -119,10 +119,20 @@ func (p Plan) Digest() (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// RootReceipt makes the volume root's application-access semantics explicit.
+// The same fields are also part of the canonical tree SHA256 via the first '.'
+// directory header. Zero file bytes never imply missing root metadata.
+type RootReceipt struct {
+	UID  int    `json:"uid"`
+	GID  int    `json:"gid"`
+	Mode uint32 `json:"mode"`
+}
+
 type Receipt struct {
-	Bytes   int64  `json:"bytes"`
-	Entries int    `json:"entries"`
-	SHA256  string `json:"sha256"`
+	Root    RootReceipt `json:"root"`
+	Bytes   int64       `json:"bytes"`
+	Entries int         `json:"entries"`
+	SHA256  string      `json:"sha256"`
 }
 
 type Marker struct {

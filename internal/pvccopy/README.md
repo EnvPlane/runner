@@ -72,6 +72,12 @@ must clean it up. Active deadlines bound newly created helper lifetimes.
    directories bottom-up. Reread the target and compare its durable receipt to
    the runner receipt. Recheck consumers/controllers and stream/hash the source
    again before exclusively writing and fsyncing the completion marker.
+   The volume root `/data` is a mandatory, size-zero first `.` directory header,
+   counted in the entry bound. Its UID/GID/mode are hashed and explicitly stored
+   as `Receipt.Root` (`RootReceipt`), including in the durable marker. Root
+   metadata is restored last, after payload/child directories, so newly created
+   root:root 0755 targets regain the source application's write semantics. A
+   missing/duplicate/non-directory/special/traversal root is never accepted.
 6. Marker binds immutable domain plan digest (when provided), exact source UID,
    actual target UID, local plan digest, byte/entry count and tree SHA256. Retry
    succeeds only after rehashing a complete matching target. Claimed, partial,
@@ -108,12 +114,28 @@ adds `DAC_OVERRIDE`, `CHOWN`, `FOWNER`. Source remains recursively read-only and
 never executes chown. PodSecurity/admission denial is surfaced, never bypassed.
 Restricted namespaces may therefore not support copies of root-owned volumes.
 
-This is a Unix native filesystem subset: no ACLs, xattrs, SELinux labels,
-timestamps, filesystem flags, file capabilities, hardlinks or sparse layout
-preservation. Workloads relying on such metadata must not be advertised as
-usable copies without additional verification/support. USTAR path constraints
-apply. Numeric IDs above signed 32-bit are rejected. Storage quantity parsing
-accepts ordinary decimal/binary byte units; other forms fail closed.
+This is a bytes + numeric POSIX ownership/mode subset, NOT a full-filesystem
+clone. The root and each regular file/directory preserve UID, GID and ordinary
+mode bits. ACLs, xattrs, SELinux labels, timestamps, filesystem flags, file
+capabilities, hardlinks and sparse layout are not preserved.
+
+The Linux live helper uses an opened-file-descriptor `flistxattr` size query on
+root/directories/files, without allocating attribute lists/values. Any visible
+attribute (including POSIX access/default ACLs, `security.selinux` and visible
+file capabilities) refuses source export. Target root attributes refuse claim;
+target payload attributes refuse verification/completion/retry. Enumeration
+errors also refuse; only ENOTSUP (no filesystem xattr support) is accepted.
+The check never removes attributes or changes source metadata.
+
+Linux may omit attributes the caller cannot access, notably `trusted.*` without
+CAP_SYS_ADMIN ([Linux xattr documentation](https://man7.org/linux/man-pages/man7/xattr.7.html)).
+We do NOT add that capability. The owner/storage integration must independently
+establish absence of hidden attributes and unsupported filesystem semantics;
+workloads depending on them are unsupported, not guaranteed usable copies.
+Non-Linux `CopyLocal` retains bytes and numeric POSIX metadata only; ACL/xattr
+detection is Linux-runtime-only, including for macOS local tests. USTAR path
+constraints apply. Numeric IDs above signed 32-bit are rejected. Storage
+quantity parsing accepts ordinary decimal/binary byte units; others fail closed.
 
 Local hard bounds: 1 TiB, 100000 entries including root, 6 hours. Domain adapter
 also bounds total operation time and item count (1000). Kubernetes JSON is
@@ -127,6 +149,11 @@ execution. They cover bytes/metadata, WFFC, receipts/markers, idempotency,
 authorization, live-spec/class drift, active consumers/controllers, PodSecurity
 refusal, partial state, target replacement, source mutation, timeout and unsafe
 archives. Race tests do not prove CSI/mount durability or live cluster admission.
+Root acceptance includes macOS non-root compatible supplementary-group changes
+and a Linux isolated root test that starts UID1000/GID2000: fresh root:root 0755
+denies writes; restored 1000:2000 0770 permits reading copied data and creating
+new root-level files. Linux tests install real user xattrs and POSIX access /
+default ACLs on temporary data and require refusal without completion markers.
 While the domain contract is unpublished, tests require a local Go workspace
 using the current contracts tree; pinned published contracts must be aligned by
 the integrator before standalone release builds.

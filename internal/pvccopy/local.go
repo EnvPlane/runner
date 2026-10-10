@@ -73,6 +73,10 @@ func Inspect(ctx context.Context, dir string, p Plan) (*Marker, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkUnsupportedMetadata(f); err != nil {
+		f.Close()
+		return nil, err
+	}
 	entries, err := f.ReadDir(1)
 	f.Close()
 	if err == io.EOF && len(entries) == 0 {

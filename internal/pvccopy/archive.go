@@ -73,7 +73,8 @@ func (r *archiveReader) complete() bool {
 }
 
 // Export emits a deliberately small tar subset: sorted directories and regular
-// files only, no links, extended metadata, ownership, sparse files, or devices.
+// files only, preserving numeric ownership and regular mode bits, not links,
+// extended metadata, sparse layout, or devices. Linux refuses visible xattrs.
 // ignoreState is used only for verifying a claimed target, never for source copy.
 func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bool) (Receipt, error) {
 	root, err := os.OpenRoot(dir)
@@ -91,6 +92,9 @@ func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bo
 			return err
 		}
 		defer f.Close()
+		if err := checkUnsupportedMetadata(f); err != nil {
+			return err
+		}
 		for {
 			if err := ctx.Err(); err != nil {
 				return err
@@ -155,29 +159,51 @@ func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bo
 			return Receipt{}, fmt.Errorf("%w: unsupported source metadata", ErrUnsafe)
 		}
 		header := &tar.Header{Name: name, Typeflag: kind, Size: size, Mode: int64(st.Mode().Perm()), Uid: uid, Gid: gid, Format: tar.FormatUSTAR}
+		// Inspect the same inode used for streaming. Directories were already
+		// checked by the bounded walk; recheck before emitting their metadata.
+		f, err := root.Open(name)
+		if err != nil {
+			return Receipt{}, err
+		}
+		actual, se := f.Stat()
+		if se != nil || !os.SameFile(st, actual) {
+			f.Close()
+			return Receipt{}, fmt.Errorf("%w: source changed", ErrUnsafe)
+		}
+		if err := checkUnsupportedMetadata(f); err != nil {
+			f.Close()
+			return Receipt{}, err
+		}
+		if name == "." {
+			r.Root = RootReceipt{UID: uid, GID: gid, Mode: uint32(header.Mode)}
+		}
 		if err := tw.WriteHeader(header); err != nil {
+			f.Close()
 			return Receipt{}, err
 		}
 		hashHeader(h, header)
 		if kind == tar.TypeReg {
-			f, err := root.Open(name)
-			if err != nil {
-				return Receipt{}, err
-			}
-			actual, se := f.Stat()
-			if se != nil || !os.SameFile(st, actual) || !actual.Mode().IsRegular() {
+			if !actual.Mode().IsRegular() {
 				f.Close()
 				return Receipt{}, fmt.Errorf("%w: source changed", ErrUnsafe)
 			}
 			_, err = io.CopyN(io.MultiWriter(tw, h), contextReader{ctx, f}, size)
 			var extra [1]byte
 			n, end := f.Read(extra[:])
+			attributeErr := checkUnsupportedMetadata(f)
 			closeErr := f.Close()
 			if err != nil {
 				return Receipt{}, err
 			}
 			if n != 0 || end != io.EOF || closeErr != nil {
 				return Receipt{}, fmt.Errorf("%w: source changed", ErrUnsafe)
+			}
+			if attributeErr != nil {
+				return Receipt{}, attributeErr
+			}
+		} else {
+			if err := f.Close(); err != nil {
+				return Receipt{}, err
 			}
 		}
 		r.Bytes += size
@@ -247,6 +273,9 @@ func consume(ctx context.Context, p Plan, input io.Reader, open func(*tar.Header
 			dirs[h.Name] = true
 		}
 		clean := &tar.Header{Name: h.Name, Typeflag: h.Typeflag, Size: h.Size, Mode: h.Mode, Uid: h.Uid, Gid: h.Gid, Format: tar.FormatUSTAR}
+		if rootEntry {
+			receipt.Root = RootReceipt{UID: h.Uid, GID: h.Gid, Mode: uint32(h.Mode)}
+		}
 		if tw != nil {
 			if err := tw.WriteHeader(clean); err != nil {
 				return Receipt{}, err
