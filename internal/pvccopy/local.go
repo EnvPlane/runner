@@ -3,6 +3,7 @@ package pvccopy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,7 +21,8 @@ func readJSON(root *os.Root, name string, value any) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// Marker reader only; decode/validation errors are authoritative.
+	defer func() { _ = f.Close() }()
 	d := json.NewDecoder(io.LimitReader(f, 16385))
 	d.DisallowUnknownFields()
 	if err := d.Decode(value); err != nil {
@@ -42,11 +44,7 @@ func writeJSON(root *os.Root, name string, value any) error {
 	if err == nil {
 		err = f.Sync()
 	}
-	ce := f.Close()
-	if err != nil {
-		return err
-	}
-	return ce
+	return errors.Join(err, f.Close())
 }
 
 func syncDirectory(root *os.Root, name string) error {
@@ -54,7 +52,8 @@ func syncDirectory(root *os.Root, name string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	// Read-only directory descriptor; Sync below is the durability gate.
+	defer func() { _ = f.Close() }()
 	return f.Sync()
 }
 
@@ -68,17 +67,18 @@ func Inspect(ctx context.Context, dir string, p Plan) (*Marker, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer root.Close()
+	// Containment descriptor only; no data is written by closing this handle.
+	defer func() { _ = root.Close() }()
 	f, err := root.Open(".")
 	if err != nil {
 		return nil, err
 	}
 	if err := checkUnsupportedMetadata(f); err != nil {
-		f.Close()
+		_ = f.Close() // Read-only root; preserve unsupported-metadata refusal.
 		return nil, err
 	}
 	entries, err := f.ReadDir(1)
-	f.Close()
+	_ = f.Close() // Root directory reader; no pending writes to flush.
 	if err == io.EOF && len(entries) == 0 {
 		return nil, nil
 	}
@@ -102,7 +102,7 @@ func Inspect(ctx context.Context, dir string, p Plan) (*Marker, error) {
 		return nil, err
 	}
 	names, err := state.Readdirnames(-1)
-	state.Close()
+	_ = state.Close() // State-directory enumeration only, not a marker writer.
 	if err != nil || len(names) != 3 {
 		return nil, ErrPartial
 	}
@@ -137,7 +137,8 @@ func Receive(ctx context.Context, dir string, p Plan, input io.Reader) (Receipt,
 	if err != nil {
 		return Receipt{}, err
 	}
-	defer root.Close()
+	// Containment handle only; payload/marker writers and fsync are checked.
+	defer func() { _ = root.Close() }()
 	if err := root.Mkdir(StateDirectory, 0700); err != nil {
 		return Receipt{}, fmt.Errorf("%w: exclusive claim", ErrPartial)
 	}
@@ -182,7 +183,8 @@ func Complete(ctx context.Context, dir string, p Plan, expected Receipt) (Marker
 	if err != nil {
 		return Marker{}, err
 	}
-	defer root.Close()
+	// Containment handle only; completion writer/fsync failures propagate below.
+	defer func() { _ = root.Close() }()
 	if err := p.Validate(); err != nil {
 		return Marker{}, err
 	}
@@ -228,7 +230,7 @@ func syncTree(ctx context.Context, root *os.Root, name string) error {
 		return err
 	}
 	entries, err := f.ReadDir(-1)
-	f.Close()
+	_ = f.Close() // Directory reader; syncDirectory below checks durability.
 	if err != nil {
 		return err
 	}
@@ -269,19 +271,22 @@ func CopyLocal(ctx context.Context, source, target string, p Plan) (Marker, erro
 		return *m, nil
 	}
 	reader, writer := io.Pipe()
-	defer reader.Close()
+	// Fallback pipe cleanup only unblocks the producer, never flushes data.
+	defer func() { _ = reader.Close() }()
 	done := make(chan error, 1)
-	go func() { _, err := Export(ctx, source, p, writer); writer.CloseWithError(err); done <- err }()
-	stop := context.AfterFunc(ctx, func() { reader.CloseWithError(ctx.Err()); writer.CloseWithError(ctx.Err()) })
+	go func() {
+		_, err := Export(ctx, source, p, writer)
+		done <- errors.Join(err, writer.CloseWithError(err))
+	}()
+	// Cancellation closes concrete in-memory pipes to unblock I/O; the context
+	// error is conveyed to peers, while producer/receiver errors are joined below.
+	stop := context.AfterFunc(ctx, func() { _ = reader.CloseWithError(ctx.Err()); _ = writer.CloseWithError(ctx.Err()) })
 	defer stop()
 	r, err := Receive(ctx, target, p, reader)
-	reader.CloseWithError(err)
+	_ = reader.CloseWithError(err) // Reader cleanup conveys Receive failure to Export.
 	sourceErr := <-done
-	if err != nil {
+	if err := errors.Join(err, sourceErr); err != nil {
 		return Marker{}, err
-	}
-	if sourceErr != nil {
-		return Marker{}, sourceErr
 	}
 	return Complete(ctx, target, p, r)
 }

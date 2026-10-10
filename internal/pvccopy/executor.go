@@ -280,15 +280,15 @@ func (e Executor) Execute(ctx context.Context, p Plan) (result Marker, retErr er
 	defer stopStream()
 	sr, sw := io.Pipe()
 	tr, tw := io.Pipe()
-	defer sr.Close()
-	defer sw.Close()
-	defer tr.Close()
-	defer tw.Close()
+	// Fallback cleanup of concrete in-memory pipes only; transfer and writer
+	// finalization errors are propagated through the result channels below.
+	defer func() { _ = sr.Close(); _ = sw.Close(); _ = tr.Close(); _ = tw.Close() }()
 	stop := context.AfterFunc(streamCtx, func() {
-		sr.CloseWithError(streamCtx.Err())
-		sw.CloseWithError(streamCtx.Err())
-		tr.CloseWithError(streamCtx.Err())
-		tw.CloseWithError(streamCtx.Err())
+		// Cancellation/unblock path: context errors are signaled to both peers.
+		_ = sr.CloseWithError(streamCtx.Err())
+		_ = sw.CloseWithError(streamCtx.Err())
+		_ = tr.CloseWithError(streamCtx.Err())
+		_ = tw.CloseWithError(streamCtx.Err())
 	})
 	defer stop()
 	sourceDone := make(chan error, 1)
@@ -296,7 +296,7 @@ func (e Executor) Execute(ctx context.Context, p Plan) (result Marker, retErr er
 	response := &boundedBuffer{Limit: 16384}
 	go func() {
 		err := e.Transport.Exec(streamCtx, helpers[0], helperArgs("pvc-export", p), nil, sw)
-		sw.CloseWithError(err)
+		err = errors.Join(err, sw.CloseWithError(err))
 		if err != nil {
 			stopStream()
 		}
@@ -304,15 +304,15 @@ func (e Executor) Execute(ctx context.Context, p Plan) (result Marker, retErr er
 	}()
 	go func() {
 		err := e.Transport.Exec(streamCtx, helpers[1], helperArgs("pvc-import", p), tr, response)
-		tr.CloseWithError(err)
+		_ = tr.CloseWithError(err) // Reader cleanup; preserve transport failure.
 		if err != nil {
 			stopStream()
 		}
 		targetDone <- err
 	}()
 	receipt, relayErr := Relay(streamCtx, p, sr, tw)
-	sr.CloseWithError(relayErr)
-	tw.CloseWithError(relayErr)
+	_ = sr.CloseWithError(relayErr) // Reader cleanup signals failure to producer.
+	relayErr = errors.Join(relayErr, tw.CloseWithError(relayErr))
 	if relayErr != nil {
 		stopStream()
 	}
@@ -335,17 +335,17 @@ func (e Executor) Execute(ctx context.Context, p Plan) (result Marker, retErr er
 	// delivery, not that an externally violated offline fence left source stable.
 	verifyReader, verifyWriter := io.Pipe()
 	verifyDone := make(chan error, 1)
-	verifyStop := context.AfterFunc(ctx, func() { verifyReader.CloseWithError(ctx.Err()); verifyWriter.CloseWithError(ctx.Err()) })
+	// Cancellation cleanup of verification pipes; peers observe ctx.Err().
+	verifyStop := context.AfterFunc(ctx, func() { _ = verifyReader.CloseWithError(ctx.Err()); _ = verifyWriter.CloseWithError(ctx.Err()) })
 	go func() {
 		err := e.Transport.Exec(ctx, helpers[0], helperArgs("pvc-export", p), nil, verifyWriter)
-		verifyWriter.CloseWithError(err)
-		verifyDone <- err
+		verifyDone <- errors.Join(err, verifyWriter.CloseWithError(err))
 	}()
 	verified, verifyErr := Relay(ctx, p, verifyReader, io.Discard)
-	verifyReader.CloseWithError(verifyErr)
+	_ = verifyReader.CloseWithError(verifyErr) // Reader cleanup unblocks verifier.
 	verifySourceErr := <-verifyDone
 	verifyStop()
-	verifyWriter.Close()
+	_ = verifyWriter.Close() // Redundant pipe cleanup; producer finalization was joined.
 	if err := errors.Join(verifyErr, verifySourceErr); err != nil {
 		return Marker{}, err
 	}

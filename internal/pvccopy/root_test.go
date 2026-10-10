@@ -87,7 +87,9 @@ func TestVolumeRootReceiptAndDifferentGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.Close()
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRootModeIsHashedAndMustRemainExact(t *testing.T) {
@@ -142,7 +144,9 @@ func TestArchiveRequiresExactlyOneFirstRootDirectory(t *testing.T) {
 					t.Fatal(err)
 				}
 				if h.Size != 0 {
-					tw.Write([]byte{0})
+					if _, err := tw.Write([]byte{0}); err != nil {
+						t.Fatal(err)
+					}
 				}
 			}
 			if err := tw.Close(); err != nil {
@@ -158,9 +162,13 @@ func TestArchiveRequiresExactlyOneFirstRootDirectory(t *testing.T) {
 	tw := tar.NewWriter(&b)
 	for _, h := range []*tar.Header{{Name: ".", Typeflag: tar.TypeDir, Mode: 0700}, {Name: "child", Typeflag: tar.TypeReg, Mode: 0600}} {
 		h.Format = tar.FormatUSTAR
-		tw.WriteHeader(h)
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
 	}
-	tw.Close()
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
 	p.MaxEntries = 1
 	if _, err := Relay(context.Background(), p, bytes.NewReader(b.Bytes()), io.Discard); err == nil {
 		t.Fatal("root excluded from entry bound")

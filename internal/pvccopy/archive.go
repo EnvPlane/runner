@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -81,7 +82,8 @@ func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bo
 	if err != nil {
 		return Receipt{}, err
 	}
-	defer root.Close()
+	// Read-only containment handle; payload/durability errors are returned below.
+	defer func() { _ = root.Close() }()
 	names := []string{"."}
 	// WalkDir reads an entire directory before checking our entry bound. Batch
 	// enumeration avoids unbounded allocation on hostile/oversized source trees.
@@ -91,7 +93,8 @@ func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bo
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		// Directory enumeration only: no buffered writes or durability to flush.
+		defer func() { _ = f.Close() }()
 		if err := checkUnsupportedMetadata(f); err != nil {
 			return err
 		}
@@ -167,24 +170,24 @@ func export(ctx context.Context, dir string, p Plan, w io.Writer, ignoreState bo
 		}
 		actual, se := f.Stat()
 		if se != nil || !os.SameFile(st, actual) {
-			f.Close()
+			_ = f.Close() // Read-only source; preserve the primary identity failure.
 			return Receipt{}, fmt.Errorf("%w: source changed", ErrUnsafe)
 		}
 		if err := checkUnsupportedMetadata(f); err != nil {
-			f.Close()
+			_ = f.Close() // Read-only source; preserve the attribute-check failure.
 			return Receipt{}, err
 		}
 		if name == "." {
 			r.Root = RootReceipt{UID: uid, GID: gid, Mode: uint32(header.Mode)}
 		}
 		if err := tw.WriteHeader(header); err != nil {
-			f.Close()
+			_ = f.Close() // Read-only source; preserve the archive-writer error.
 			return Receipt{}, err
 		}
 		hashHeader(h, header)
 		if kind == tar.TypeReg {
 			if !actual.Mode().IsRegular() {
-				f.Close()
+				_ = f.Close() // Read-only source; preserve the source-type failure.
 				return Receipt{}, fmt.Errorf("%w: source changed", ErrUnsafe)
 			}
 			_, err = io.CopyN(io.MultiWriter(tw, h), contextReader{ctx, f}, size)
@@ -295,10 +298,7 @@ func consume(ctx context.Context, p Plan, input io.Reader, open func(*tar.Header
 		}
 		_, err = io.CopyN(io.MultiWriter(writers...), contextReader{ctx, tr}, h.Size)
 		if file != nil {
-			ce := file.Close()
-			if err == nil {
-				err = ce
-			}
+			err = errors.Join(err, file.Close())
 		}
 		if err != nil {
 			return Receipt{}, err
@@ -342,11 +342,7 @@ func (f syncedFile) Close() error {
 	if err == nil {
 		err = f.Sync()
 	}
-	ce := f.File.Close()
-	if err != nil {
-		return err
-	}
-	return ce
+	return errors.Join(err, f.File.Close())
 }
 
 // Paths use os.Root for containment, and exclusively created objects in a
