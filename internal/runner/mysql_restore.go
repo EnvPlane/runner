@@ -13,6 +13,19 @@ import (
 	"github.com/envplane/runner/internal/mysqlcopy"
 )
 
+func mysqlRestoreFailureMessage(err error) string {
+	stage, code := mysqlcopy.FailureInfo(err)
+	stages := mysqlcopy.FailureStages(err)
+	labels := make([]string, 0, len(stages))
+	for _, value := range stages {
+		labels = append(labels, string(value))
+	}
+	if len(labels) == 0 {
+		labels = append(labels, string(stage))
+	}
+	return fmt.Sprintf("MySQL restore was not verified; source preserved. Stages: %s; code: %s. Review protected backup, TLS, source identity, helper permissions and generated target credentials.", strings.Join(labels, ","), code)
+}
+
 func mysqlRestoreRunnerContractVersion(cfg runnerConfig) string {
 	parts := strings.Split(cfg.MySQLRestoreHelperImage, "@sha256:")
 	if len(parts) != 2 || parts[0] != "ghcr.io/envplane/runner" || len(parts[1]) != 64 || cfg.PVCCopyRunnerServiceAccount == "" || !cfg.MySQLRestoreAllowRootInit {

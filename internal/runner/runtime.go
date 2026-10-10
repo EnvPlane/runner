@@ -1107,7 +1107,7 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	case domain.RunnerOperationRestoreMySQL:
 		if err := executeRunnerMySQLRestore(ctx, cfg, command, namespaceAllowed); err != nil {
 			result.ErrorCode = "mysql_restore_not_verified"
-			result.Error = "MySQL restore was not verified; source preserved. Review protected backup, TLS, source identity, helper permissions and generated target credentials."
+			result.Error = mysqlRestoreFailureMessage(err)
 			return result
 		}
 		result.Namespace = command.Environment.Namespace

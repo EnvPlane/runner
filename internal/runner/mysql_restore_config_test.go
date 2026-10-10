@@ -2,12 +2,25 @@ package runner
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/envplane/contracts/domain"
 	"github.com/envplane/runner/internal/mysqlcopy"
 )
+
+func TestMySQLRestoreResultNeverExposesRawFailure(t *testing.T) {
+	message := mysqlRestoreFailureMessage(errors.New("password=private-value SELECT customer-data; kubectl body"))
+	for _, sensitive := range []string{"private-value", "SELECT", "customer-data", "kubectl body"} {
+		if strings.Contains(message, sensitive) {
+			t.Fatal("raw failure escaped diagnostic boundary")
+		}
+	}
+	if !strings.Contains(message, "Stages: unknown; code: operation_failed") {
+		t.Fatal("missing bounded constant diagnostic")
+	}
+}
 
 func TestMySQLRestoreTrustedConfigRejectsTrailingJSON(t *testing.T) {
 	t.Setenv("ENVPLANE_MYSQL_RESTORE_SOURCE_FENCES", `[{"Namespace":"source","PolicyName":"fence"}] {}`)
