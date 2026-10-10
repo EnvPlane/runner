@@ -79,7 +79,7 @@ func executeRunnerPVCCopy(ctx context.Context, cfg runnerConfig, command domain.
 		if err := checkPVCCopyNamespaceOwner(ctx, command.Environment); err != nil {
 			return err
 		}
-		return transport.RequireAdmissionFence(ctx, plan, cfg.RunnerNamespace, cfg.PVCCopyRunnerServiceAccount)
+		return requireConfiguredPVCSourceFence(ctx, transport, plan, cfg.RunnerNamespace, cfg.PVCCopyRunnerServiceAccount)
 	}}
 	markers, err := executor.ExecuteDomain(ctx, *plan, plan.AllowedSourceNamespaces, cfg.PVCCopyHelperImage)
 	if err != nil {
