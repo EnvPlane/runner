@@ -1,6 +1,6 @@
 # Docs-only contracts publication invalidates otherwise reproducible consumer CI
 
-Status: immediate mitigation in progress (align all consumers to v0.1.111); release coordination follow-up OPEN.
+Status: v0.1.111 mitigation completed; coordinated release fix implemented locally, publication verification pending.
 
 ## Reproduction and evidence
 
@@ -15,3 +15,14 @@ Resolve the exact immutable v0.1.111 tag, update all direct consumer pins/checks
 ## Codex implementation prompt for follow-up
 
 Design coordinated immutable contracts release snapshots for consumer verification, exclude genuinely docs-only changes from automatic module publication where appropriate, and gate production image/umbrella selection on the exact candidate SHA's required successful checks. Preserve schema/version compatibility checks and fail closed on unavailable GitHub status data. Test delayed publisher/CI ordering, docs-only releases, real incompatible contracts changes, concurrent candidate updates, fork/PR event trust and exact-SHA checkout. Do not solve the race by simply disabling pin verification or accepting arbitrary old modules.
+
+## Local implementation and evidence
+
+All seven product Go consumers and both deploy live-driver modules now record the
+reviewed v0.1.111 commit, module checksums and OpenAPI digest. The real network-backed
+verifier passed for all nine. Nine regression tests passed in each product consumer;
+moving latest and environment overrides cannot alter the accepted snapshot. Product
+CI invokes the verifier. See `docs/contracts-release-snapshot.md` for the decision.
+Publisher, dependency-update bot and exact-candidate CI gates are separate changes
+being verified together. Hosted checks for the new commits must still run after push;
+local passing tests are not a claim of completed hosted publication or deployment.
