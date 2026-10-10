@@ -71,6 +71,7 @@ func executeRunnerPVCCopy(ctx context.Context, cfg runnerConfig, command domain.
 		return err
 	}
 	permission := domain.PVCCopyPermission{PlanID: plan.PlanID, TenantID: tenant, ProjectID: cfg.ProjectID, EnvironmentID: command.Environment.ID, TemplateRevisionID: command.ProjectConfig.TemplateRevisionID, TemplateDigest: command.ProjectConfig.TemplateDigest, TargetNamespace: command.Environment.Namespace, AllowedSourceNamespaces: plan.AllowedSourceNamespaces, AllowedImages: []string{cfg.PVCCopyHelperImage}, MaxBytes: 1 << 40, StorageQuotaBytes: 1 << 40, TimeoutSeconds: 300}
+	permission.ApprovedProductionSources = cfg.PVCCopyApprovedProductionSources
 	if err := domain.ValidatePVCCopyPlan(*plan, sources, permission); err != nil {
 		return err
 	}
