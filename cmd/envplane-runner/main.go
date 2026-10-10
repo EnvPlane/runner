@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/envplane/runner/internal/mysqlcopy"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -20,6 +21,14 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
+		case "mysql-client-config":
+			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer cancel()
+			if err := mysqlcopy.HelperCLI(ctx, os.Args[2:]); err != nil {
+				_, _ = os.Stderr.WriteString("MySQL helper failed\n")
+				os.Exit(1)
+			}
+			return
 		case "pvc-export", "pvc-import", "pvc-verify", "pvc-complete":
 			ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer cancel()

@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/envplane/contracts/domain"
+	"github.com/envplane/runner/internal/mysqlcopy"
 	"github.com/envplane/runner/internal/orchestrator"
 	"gopkg.in/yaml.v3"
 )
@@ -69,6 +70,12 @@ type runnerConfig struct {
 	PVCCopySourceNamespaces              []string
 	PVCCopyRunnerServiceAccount          string
 	PVCCopyAllowRootHelpers              bool
+	PVCCopyApprovedProductionSources     []domain.PVCCopySourceRef
+	MySQLRestoreHelperImage              string
+	MySQLRestoreSourceNamespaces         []string
+	MySQLRestoreTargetImages             []string
+	MySQLRestoreAllowRootInit            bool
+	MySQLRestoreSourceFences             []mysqlcopy.AdmissionFenceRef
 }
 
 func runnerConfigFromEnv() runnerConfig {
@@ -87,6 +94,10 @@ func runnerConfigFromEnv() runnerConfig {
 		authToken = ""
 	}
 	cfg := runnerConfig{
+		MySQLRestoreHelperImage:              strings.TrimSpace(getenv("ENVPLANE_MYSQL_RESTORE_HELPER_IMAGE", "")),
+		MySQLRestoreSourceNamespaces:         strings.Split(getenv("ENVPLANE_MYSQL_RESTORE_SOURCE_NAMESPACES", ""), ","),
+		MySQLRestoreTargetImages:             strings.Split(getenv("ENVPLANE_MYSQL_RESTORE_TARGET_IMAGES", ""), ","),
+		MySQLRestoreAllowRootInit:            strings.EqualFold(getenv("ENVPLANE_MYSQL_RESTORE_ALLOW_ROOT_INIT", "false"), "true"),
 		PVCCopyHelperImage:                   strings.TrimSpace(getenv("ENVPLANE_PVC_COPY_HELPER_IMAGE", "")),
 		PVCCopySourceNamespaces:              strings.Split(getenv("ENVPLANE_PVC_COPY_SOURCE_NAMESPACES", ""), ","),
 		PVCCopyRunnerServiceAccount:          strings.TrimSpace(getenv("ENVPLANE_PVC_COPY_RUNNER_SERVICE_ACCOUNT", "")),
@@ -121,6 +132,30 @@ func runnerConfigFromEnv() runnerConfig {
 		ReleasePlanAllowedKinds:              normalizeRunnerKindList(getenv("ENVPLANE_RELEASE_PLAN_ALLOWED_KINDS", "")),
 	}
 	cfg.EnvDiagnostics = legacyDiagnostics()
+	approvedSources := getenv("ENVPLANE_PVC_COPY_APPROVED_PRODUCTION_SOURCES", "")
+	if len(approvedSources) > 0 && len(approvedSources) <= 65536 {
+		decoder := json.NewDecoder(strings.NewReader(approvedSources))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&cfg.PVCCopyApprovedProductionSources) != nil || len(cfg.PVCCopyApprovedProductionSources) > 32 {
+			cfg.PVCCopyApprovedProductionSources = nil
+		}
+		var trailing any
+		if decoder.Decode(&trailing) != io.EOF {
+			cfg.PVCCopyApprovedProductionSources = nil
+		}
+	}
+	rawFences := getenv("ENVPLANE_MYSQL_RESTORE_SOURCE_FENCES", "")
+	if len(rawFences) > 0 && len(rawFences) <= 65536 {
+		decoder := json.NewDecoder(strings.NewReader(rawFences))
+		decoder.DisallowUnknownFields()
+		if decoder.Decode(&cfg.MySQLRestoreSourceFences) != nil || len(cfg.MySQLRestoreSourceFences) > 32 {
+			cfg.MySQLRestoreSourceFences = nil
+		}
+		var trailing any
+		if decoder.Decode(&trailing) != io.EOF {
+			cfg.MySQLRestoreSourceFences = nil
+		}
+	}
 	return cfg
 }
 
@@ -1069,6 +1104,16 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 	}
 	var err error
 	switch command.Operation {
+	case domain.RunnerOperationRestoreMySQL:
+		if err := executeRunnerMySQLRestore(ctx, cfg, command, namespaceAllowed); err != nil {
+			result.ErrorCode = "mysql_restore_not_verified"
+			result.Error = "MySQL restore was not verified; source preserved. Review protected backup, TLS, source identity, helper permissions and generated target credentials."
+			return result
+		}
+		result.Namespace = command.Environment.Namespace
+		result.ReleaseName = ""
+		result.MySQLRestoreVerified = true
+		result.MySQLRestorePlanDigest = command.MySQLRestorePlan.Digest
 	case domain.RunnerOperationMaterializePVC:
 		if err := executeRunnerPVCCopy(ctx, cfg, command, namespaceAllowed); err != nil {
 			result.ErrorCode = "pvc_copy_not_verified"
@@ -1361,7 +1406,8 @@ var runnerProjectConfigAllowedKeys = map[string]map[string]struct{}{
 		"planId": {}, "planDigest": {},
 	},
 	"bootstrapSessionData": {
-		"manifestTemplates": {}, "manifestTemplatesSourceFingerprint": {},
+		"mysqlRestoreSources": {},
+		"manifestTemplates":   {}, "manifestTemplatesSourceFingerprint": {},
 		"pvcCopySources": {},
 	},
 }
@@ -1508,21 +1554,25 @@ func reportRunnerHeartbeat(ctx context.Context, cfg runnerConfig, client *http.C
 
 func reportRunnerHeartbeatWithEndpointPreflight(ctx context.Context, cfg runnerConfig, client *http.Client, status string, errorMessage string, preflight *domain.ManagementEndpointPreflight) error {
 	payload := domain.RunnerHeartbeatRequest{
-		PVCCopyContractVersion:  pvcCopyRunnerContractVersion(cfg),
-		PVCCopySourceNamespaces: cfg.PVCCopySourceNamespaces,
-		PVCCopyHelperImage:      cfg.PVCCopyHelperImage,
-		ProjectID:               cfg.ProjectID,
-		ClusterID:               cfg.ClusterID,
-		RunnerID:                cfg.RunnerID,
-		DeploymentMode:          cfg.DeploymentMode,
-		RunnerNamespace:         cfg.RunnerNamespace,
-		HelmTargetNamespaces:    cfg.helmTargetNamespaces(),
-		HelmNamespaceRBACReady:  len(cfg.helmTargetNamespaces()) > 0,
-		RunnerAuthToken:         cfg.RunnerAuthToken,
-		Status:                  status,
-		Error:                   errorMessage,
-		EndpointPreflight:       preflight,
-		ObservedAt:              time.Now().UTC(),
+		MySQLRestoreContractVersion:  mysqlRestoreRunnerContractVersion(cfg),
+		MySQLRestoreHelperImage:      cfg.MySQLRestoreHelperImage,
+		MySQLRestoreSourceNamespaces: cfg.MySQLRestoreSourceNamespaces,
+		MySQLRestoreTargetImages:     cfg.MySQLRestoreTargetImages,
+		PVCCopyContractVersion:       pvcCopyRunnerContractVersion(cfg),
+		PVCCopySourceNamespaces:      cfg.PVCCopySourceNamespaces,
+		PVCCopyHelperImage:           cfg.PVCCopyHelperImage,
+		ProjectID:                    cfg.ProjectID,
+		ClusterID:                    cfg.ClusterID,
+		RunnerID:                     cfg.RunnerID,
+		DeploymentMode:               cfg.DeploymentMode,
+		RunnerNamespace:              cfg.RunnerNamespace,
+		HelmTargetNamespaces:         cfg.helmTargetNamespaces(),
+		HelmNamespaceRBACReady:       len(cfg.helmTargetNamespaces()) > 0,
+		RunnerAuthToken:              cfg.RunnerAuthToken,
+		Status:                       status,
+		Error:                        errorMessage,
+		EndpointPreflight:            preflight,
+		ObservedAt:                   time.Now().UTC(),
 	}
 	return runnerPostJSON(ctx, client, cfg.ControlPlaneURL+"/api/v1/runners/heartbeat", "", payload, nil)
 }
