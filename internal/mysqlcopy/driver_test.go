@@ -176,7 +176,7 @@ func (k *fakeKube) Run(ctx context.Context, args []string, in io.Reader, out io.
 			_, err := io.WriteString(out, "999\n")
 			return err
 		}
-		if cmd[0] == "kill" {
+		if len(cmd) == 3 && cmd[0] == "sh" && cmd[1] == "-c" && cmd[2] == "kill -TERM 1" {
 			k.mu.Lock()
 			defer k.mu.Unlock()
 			pod := k.objects[key("pod", ns, n)]

@@ -98,6 +98,20 @@ func TestMySQL8EngineConsistentFixture(t *testing.T) {
 	fixtureConfig(t, ctx, source, "/config/admin.cnf", "backupadmin", "fixture-backup-admin")
 	fixtureConfig(t, ctx, source, "/config/writer.cnf", "writer", "fixture-writer")
 	fixtureConfig(t, ctx, target, "/config/app.cnf", "app", "fixture-target-app")
+	grants := &bytes.Buffer{}
+	if engineSQL(ctx, source, "/config/admin.cnf", "SHOW GRANTS FOR CURRENT_USER;\n", grants) != nil || !catalogAuthority("app", grants.String()) {
+		t.Fatal("real admin catalog authority not proven")
+	}
+	// Demonstrate actual catalog filtering: a SELECT-only dump principal's zero
+	// trigger count is not absence proof. The approved metadata admin sees it.
+	fixtureBootstrap(t, ctx, source, "CREATE TRIGGER app.catalog_probe BEFORE INSERT ON app.records FOR EACH ROW SET NEW.payload=NEW.payload;\n")
+	for _, probe := range []struct{ config, want string }{{"/config/app.cnf", "0"}, {"/config/admin.cnf", "1"}} {
+		count := &bytes.Buffer{}
+		if engineSQL(ctx, source, probe.config, "SELECT COUNT(*) FROM information_schema.triggers WHERE trigger_schema='app';\n", count) != nil || strings.TrimSpace(count.String()) != probe.want {
+			t.Fatal("catalog visibility fixture did not demonstrate hidden object")
+		}
+	}
+	fixtureBootstrap(t, ctx, source, "DROP TRIGGER app.catalog_probe;\n")
 	uuid := &bytes.Buffer{}
 	if engineSQL(ctx, source, "/config/app.cnf", "SELECT @@server_uuid;\n", uuid) != nil {
 		t.Fatal("fixture UUID query")
@@ -230,6 +244,15 @@ func TestMySQL8EngineConsistentFixture(t *testing.T) {
 	}
 	if h.Check(ctx) != nil {
 		t.Fatal("backup lock lost")
+	}
+	// Exercise the production signal protocol as the server's unprivileged UID,
+	// not Docker's default root exec user and not a nonexistent kill executable.
+	if dockerRun(ctx, []string{"exec", "--user", "999:999", target, "sh", "-c", "kill -TERM 1"}, nil, io.Discard) != nil {
+		t.Fatal("same-UID graceful shutdown signal failed")
+	}
+	exit := &bytes.Buffer{}
+	if dockerRun(ctx, []string{"wait", target}, nil, exit) != nil || strings.TrimSpace(exit.String()) != "0" {
+		t.Fatal("MySQL did not shut down cleanly")
 	}
 	t.Logf("real MySQL8 restored %d snapshot rows/%d dump bytes; source writer advanced to %d rows", proof.Tables[0].Rows, proof.Bytes, rows)
 }

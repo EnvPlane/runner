@@ -618,7 +618,9 @@ func (d *NativeDriver) waitSQL(ctx context.Context, p Plan, ep Endpoint) error {
 	}
 }
 func (d *NativeDriver) Shutdown(ctx context.Context, p Plan, ep Endpoint) error {
-	if err := d.exec(ctx, p, ep, []string{"kill", "-TERM", "1"}, nil, io.Discard); err != nil {
+	// Official MySQL images do not ship an external kill executable. Their
+	// POSIX shell builtin signals the same-UID PID 1 without extra capabilities.
+	if err := d.exec(ctx, p, ep, []string{"sh", "-c", "kill -TERM 1"}, nil, io.Discard); err != nil {
 		return err
 	}
 	for {

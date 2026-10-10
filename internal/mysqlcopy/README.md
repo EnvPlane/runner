@@ -1,5 +1,7 @@
 # Bounded logical MySQL copy
 
+Executed checks and the live-proof boundary: [VERIFICATION.md](VERIFICATION.md).
+
 `DomainExecutor.ExecuteDomain(ctx, Plan)` executes a metadata-only, UID-bound
 item. Main adapts the shared domain contract and owns lease/permission checks,
 SecretMaterialization, template sealing, operation dispatch and publication.
