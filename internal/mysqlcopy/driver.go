@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/url"
 	"reflect"
@@ -28,6 +29,7 @@ type DriverConfig struct {
 }
 type NativeDriver struct {
 	validateMu          sync.Mutex // dump/restore preflights run concurrently; SQL streams do not hold this
+	namespaceMu         sync.Mutex // concurrent teardown polls share immutable namespace UID pins
 	cfg                 DriverConfig
 	planDigest          string
 	pods                map[string]ownedPod
@@ -122,6 +124,8 @@ func (d *NativeDriver) gate(ctx context.Context, p Plan, s Stage) error {
 	return d.pinNamespaces(ctx, p)
 }
 func (d *NativeDriver) pinNamespaces(ctx context.Context, p Plan) error {
+	d.namespaceMu.Lock()
+	defer d.namespaceMu.Unlock()
 	for _, ns := range []string{p.Source.PVC.Namespace, p.Target.Namespace} {
 		o, err := d.json(ctx, []string{"get", "namespace", ns, "-o", "json"}, nil)
 		if err != nil || str(o, "metadata", "uid") == "" || nested(o, "metadata", "deletionTimestamp") != nil {
@@ -680,31 +684,59 @@ func (d *NativeDriver) Commit(ctx context.Context, p Plan, r Receipt) error {
 	return err
 }
 func (d *NativeDriver) Cleanup(ctx context.Context, p Plan) error {
-	var failed bool
+	var failures []error
+	waiting := []ownedPod{}
+	// Send every UID-preconditioned delete before waiting. All helpers retain
+	// their full 30s grace; multiple PID1 sleepers must not serialize that grace.
 	for uid, owned := range d.pods {
 		if err := d.pinNamespaces(ctx, p); err != nil {
-			return err
+			if ctx.Err() != nil {
+				err = ctx.Err()
+			}
+			return errors.Join(errors.Join(failures...), safeFailure(CleanupNamespace, err))
 		}
 		// Only Pods created by this in-memory execution are eligible. Target data,
 		// receipts, approved Secrets and all pre-existing/orphan objects are retained.
 		path := "/api/v1/namespaces/" + url.PathEscape(owned.endpoint.Pod.Namespace) + "/pods/" + url.PathEscape(owned.endpoint.Pod.Name)
 		b, err := json.Marshal(object{"apiVersion": "v1", "kind": "DeleteOptions", "preconditions": object{"uid": uid}, "gracePeriodSeconds": 30})
 		if err != nil {
-			return ErrUnsafe
+			return safeFailure(CleanupHelpers, ErrUnsafe)
 		}
-		if d.run(ctx, []string{"delete", "--raw", path, "-f", "-"}, bytes.NewReader(b), io.Discard) != nil {
-			failed = true
-		} else if d.waitDeleted(ctx, owned.endpoint.Pod) != nil {
-			failed = true
+		if err := d.run(ctx, []string{"delete", "--raw", path, "-f", "-"}, bytes.NewReader(b), io.Discard); err != nil {
+			stage := DeleteSourceHelper
+			if owned.target {
+				stage = DeleteTargetHelper
+			}
+			failures = append(failures, safeFailure(stage, err))
+		} else {
+			waiting = append(waiting, owned)
 		}
 	}
-	if failed {
-		return ErrOperation
+	results := make(chan error, len(waiting))
+	for _, owned := range waiting {
+		go func() {
+			stage := WaitSourceHelperDeleted
+			if owned.target {
+				stage = WaitTargetHelperDeleted
+			}
+			results <- safeFailure(stage, d.waitDeleted(ctx, p, owned.endpoint.Pod))
+		}()
 	}
-	return nil
+	for range waiting {
+		if err := <-results; err != nil {
+			failures = append(failures, err)
+		}
+	}
+	return errors.Join(failures...)
 }
-func (d *NativeDriver) waitDeleted(ctx context.Context, ref Ref) error {
+func (d *NativeDriver) waitDeleted(ctx context.Context, p Plan, ref Ref) error {
 	for {
+		if err := d.pinNamespaces(ctx, p); err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			return err
+		}
 		b := &limitBuffer{max: 1 << 20}
 		if err := d.run(ctx, []string{"get", "pod", ref.Name, "-n", ref.Namespace, "--ignore-not-found", "-o", "json"}, nil, b); err != nil {
 			return err

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"io"
 	"slices"
 	"time"
@@ -56,32 +57,44 @@ func safeError(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	if errors.Is(err, ErrUnsafe) {
+		return ErrUnsafe
+	}
+	if errors.Is(err, ErrPartial) {
+		return ErrPartial
+	}
 	return ErrOperation
 }
 
 // ExecuteDomain consumes a metadata-only plan; main/Hume own domain adaptation,
 // release-job serialization, source quiescence proof and publication gates.
 func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Receipt, retErr error) {
-	if p.Validate() != nil || e.Transport == nil || e.Authority == nil {
-		return Receipt{}, ErrUnsafe
-	}
+	stage := ValidatePlan
 	defer func() {
 		if retErr != nil {
 			result = Receipt{}
+			retErr = safeFailure(stage, retErr)
 		}
 	}()
+	if p.Validate() != nil || e.Transport == nil || e.Authority == nil {
+		return Receipt{}, ErrUnsafe
+	}
 	ctx, cancel := context.WithTimeout(ctx, p.Timeout)
 	defer cancel()
 	defer func() {
-		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		// Target MySQL on a failed transfer retains its full 30s grace period.
+		// Cleanup remains independently bounded, including API/deletion latency.
+		cleanup, stop := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
 		defer stop()
-		if e.Transport.Cleanup(cleanup, p) != nil {
-			retErr = ErrOperation
+		if err := e.Transport.Cleanup(cleanup, p); err != nil {
+			retErr = errors.Join(safeFailure(stage, retErr), safeFailure(CleanupHelpers, err))
 		}
 	}()
+	stage = ReadSource
 	if err := e.gate(ctx, p, ReadSource); err != nil {
 		return Receipt{}, err
 	}
+	stage = CheckCredentials
 	credentials, err := e.Transport.CheckCredentials(ctx, p)
 	if err != nil {
 		return Receipt{}, safeError(ctx, err)
@@ -98,6 +111,7 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	if p.DDLMode == "backup_lock" && (subtle.ConstantTimeCompare(credentials.Backup[:], credentials.Target[:]) == 1 || subtle.ConstantTimeCompare(credentials.Backup[:], credentials.TargetRoot[:]) == 1) {
 		return Receipt{}, ErrUnsafe
 	}
+	stage = ReadSource
 	source, err := e.Transport.Source(ctx, p)
 	if err != nil {
 		return Receipt{}, safeError(ctx, err)
@@ -105,6 +119,7 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	if err := validateSource(p, source); err != nil {
 		return Receipt{}, err
 	}
+	stage = HoldDDL
 	if err := e.gate(ctx, p, HoldDDL); err != nil {
 		return Receipt{}, err
 	}
@@ -115,8 +130,8 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	defer func() {
 		release, stop := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer stop()
-		if hold.Release(release) != nil {
-			retErr = ErrOperation
+		if err := hold.Release(release); err != nil {
+			retErr = errors.Join(safeFailure(stage, retErr), safeFailure(ReleaseDDL, err))
 		}
 	}()
 	check := func(stage Stage) error {
@@ -142,9 +157,11 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 		}
 		return nil
 	}
+	stage = ProvisionTarget
 	if err := check(ProvisionTarget); err != nil {
 		return Receipt{}, err
 	}
+	stage = InspectTarget
 	existing, err := e.Transport.Inspect(ctx, p)
 	if err != nil {
 		return Receipt{}, ErrPartial
@@ -155,11 +172,13 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 			return Receipt{}, ErrPartial
 		}
 		// Transport re-verifies persisted target data before returning a receipt.
+		stage = Complete
 		if err := check(Complete); err != nil {
 			return Receipt{}, err
 		}
 		return *existing, nil
 	}
+	stage = ProvisionTarget
 	target, err := e.Transport.Provision(ctx, p)
 	if err != nil {
 		return Receipt{}, safeError(ctx, err)
@@ -167,6 +186,7 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	if target.PVCUID == "" || target.PodUID == "" || target.SecretUID != p.Target.Credentials.Ref.UID || target.PVCUID == p.Source.PVC.UID {
 		return Receipt{}, ErrUnsafe
 	}
+	stage = Transfer
 	if err := check(Transfer); err != nil {
 		return Receipt{}, err
 	}
@@ -206,6 +226,7 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 			return Receipt{}, ErrUnsafe
 		}
 	}
+	stage = Verify
 	if err := check(Verify); err != nil {
 		return Receipt{}, err
 	}
@@ -217,16 +238,20 @@ func (e DomainExecutor) ExecuteDomain(ctx context.Context, p Plan) (result Recei
 	if err != nil || !sameProof(proof, actual) {
 		return Receipt{}, ErrUnsafe
 	}
+	stage = Complete
 	if err := check(Complete); err != nil {
 		return Receipt{}, err
 	}
+	stage = ShutdownTarget
 	if err := e.Transport.Shutdown(ctx, p, target); err != nil {
 		return Receipt{}, safeError(ctx, err)
 	}
+	stage = Complete
 	if err := check(Complete); err != nil {
 		return Receipt{}, err
 	}
 	result = Receipt{1, digest, p.Binding, p.Source.PVC.UID, p.Source.StatefulSet.UID, source.ServerUUID, target, proof, true}
+	stage = CommitReceipt
 	if err := e.Transport.Commit(ctx, p, result); err != nil {
 		return Receipt{}, safeError(ctx, err)
 	}
