@@ -3,6 +3,7 @@ package pvccopy
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -49,6 +50,14 @@ type HelperSpec struct {
 	ReadOnly  bool
 	Image     string
 	Timeout   time.Duration
+}
+
+// SourceHelperName supports exact resourceNames permissions for pods/exec and
+// helper deletion. Existing same-name Pods are NEVER adopted or deleted on a
+// create conflict; the owner must clean up an orphan using its known identity.
+func SourceHelperName(ref PVCRef) string {
+	h := sha256.Sum256([]byte(ref.Namespace + "/" + ref.Name + "/" + ref.UID))
+	return "pvccopy-source-" + hex.EncodeToString(h[:12])
 }
 
 // Transport operations must honor context and return only after I/O goroutines
@@ -224,7 +233,11 @@ func (e Executor) Execute(ctx context.Context, p Plan) (result Marker, retErr er
 		}
 	}()
 	for i, ref := range []PVCRef{p.Source, p.Target} {
-		spec := HelperSpec{ref.Namespace, "pvccopy-" + hex.EncodeToString(entropy[:]) + fmt.Sprint(i), owner, ref, i == 0, p.Image, p.Timeout}
+		name := "pvccopy-target-" + hex.EncodeToString(entropy[:])
+		if i == 0 {
+			name = SourceHelperName(ref)
+		}
+		spec := HelperSpec{ref.Namespace, name, owner, ref, i == 0, p.Image, p.Timeout}
 		h, err := e.Transport.CreateHelper(ctx, spec)
 		if err != nil {
 			// Only a known exact create identity is eligible for bounded cleanup.

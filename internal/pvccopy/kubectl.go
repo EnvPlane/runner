@@ -213,6 +213,9 @@ func (k *Kubectl) createHelper(ctx context.Context, s HelperSpec, dryRun bool) (
 	if s.Namespace != s.PVC.Namespace || !dnsName.MatchString(s.Name) || s.Owner == "" || s.Timeout <= 0 || s.Timeout > MaxCopyTimeout {
 		return Helper{}, ErrUnsafe
 	}
+	if s.ReadOnly && s.Name != SourceHelperName(s.PVC) {
+		return Helper{}, fmt.Errorf("%w: noncanonical source helper name", ErrUnsafe)
+	}
 	seconds := int64(math.Ceil(s.Timeout.Seconds())) + 30
 	mount := map[string]any{"name": "data", "mountPath": "/data", "readOnly": s.ReadOnly}
 	if s.ReadOnly {
@@ -291,6 +294,9 @@ func (k *Kubectl) getOwnedHelper(ctx context.Context, h Helper) (podObject, erro
 
 func (k *Kubectl) validateHelperPod(obj podObject, h Helper) error {
 	s := obj.Spec
+	if h.ReadOnly && h.Name != SourceHelperName(h.PVC) {
+		return ErrUnsafe
+	}
 	if h.Image != k.RunnerImage || h.PVC.Namespace != h.Namespace || s.ServiceAccount != k.ServiceAccount || s.Automount == nil || *s.Automount || len(s.Containers) != 1 || len(s.InitContainers) != 0 || len(s.EphemeralContainers) != 0 || len(s.Volumes) != 1 {
 		return fmt.Errorf("%w: mutated helper specification", ErrUnsafe)
 	}

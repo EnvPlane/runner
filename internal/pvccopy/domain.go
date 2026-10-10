@@ -253,7 +253,11 @@ func (d DomainExecutor) ExecuteDomain(ctx context.Context, p domain.PVCCopyPlan,
 	// the trusted root policy is required by source ownership or volume roots.
 	for _, item := range p.Items {
 		for i, ref := range []PVCRef{{item.SourceNamespace, item.SourceName, item.SourceUID}, {Namespace: p.TargetNamespace, Name: item.TargetName}} {
-			s := HelperSpec{Namespace: ref.Namespace, Name: fmt.Sprintf("pvccopy-preflight-%d", i), Owner: p.Digest, PVC: ref, ReadOnly: i == 0, Image: p.Image, Timeout: time.Duration(item.TimeoutSeconds) * time.Second}
+			name := "pvccopy-target-preflight"
+			if i == 0 {
+				name = SourceHelperName(ref)
+			}
+			s := HelperSpec{Namespace: ref.Namespace, Name: name, Owner: p.Digest, PVC: ref, ReadOnly: i == 0, Image: p.Image, Timeout: time.Duration(item.TimeoutSeconds) * time.Second}
 			if err := d.Kubectl.PreflightHelper(ctx, s); err != nil {
 				return nil, err
 			}

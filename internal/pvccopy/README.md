@@ -39,6 +39,16 @@ durable-target protocol on local directories. `Export`, `Relay`, `Receive`,
 runner image configured by `Kubectl.RunnerImage` (sha256 digest required).
 The Pod command explicitly overrides ENTRYPOINT with bounded `sleep`.
 
+`SourceHelperName(PVCRef)` returns `pvccopy-source-` plus the first 12 bytes of
+SHA256(`namespace/name/UID`) as 24 lowercase hex characters. Source dry-run and
+real create use that same name, allowing source `pods/exec` and `pods/delete`
+permissions scoped by exact `resourceNames`; target helpers use random names.
+Kubernetes cannot name-restrict create, so the admin source fence must restrict
+**every** RunnerSA Pod CREATE in selected source namespaces to the exact bounded
+read-only helper, including rejecting Secret/other-PVC mount sidechannels.
+An orphan same-name helper is never adopted or deleted on conflict; the owner
+must clean it up. Active deadlines bound newly created helper lifetimes.
+
 ## Safety protocol
 
 1. Re-read exact PVC UID, mode, binding and source OFFLINE declaration. Refuse

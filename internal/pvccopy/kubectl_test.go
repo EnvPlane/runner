@@ -3,6 +3,7 @@ package pvccopy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -262,6 +263,13 @@ func TestKubectlExecutorRealBytesAndSafety(t *testing.T) {
 		t.Fatalf("bad lifecycle: %+v %+v", m, f)
 	}
 	for i, obj := range f.createdPods {
+		name := metadata(obj)["name"].(string)
+		if i == 0 && name != SourceHelperName(p.Source) {
+			t.Fatal("source helper not resourceNames bound")
+		}
+		if i == 1 && !strings.HasPrefix(name, "pvccopy-target-") {
+			t.Fatal("target helper lacks random namespace")
+		}
 		spec := obj["spec"].(map[string]any)
 		if _, exists := spec["securityContext"].(map[string]any)["fsGroup"]; exists {
 			t.Fatal("source-changing fsGroup")
@@ -410,6 +418,36 @@ func TestAdmissionMutationsRefusedAndKnownUIDCleaned(t *testing.T) {
 			}
 			if _, err := os.Stat(filepath.Join(f.target, StateDirectory)); !os.IsNotExist(err) {
 				t.Fatal("admission error claimed target")
+			}
+		})
+	}
+}
+
+func TestSourceHelperDeterministicAndOrphanNeverAdopted(t *testing.T) {
+	p := testPlan()
+	hash := sha256.Sum256([]byte(p.Source.Namespace + "/" + p.Source.Name + "/" + p.Source.UID))
+	want := fmt.Sprintf("pvccopy-source-%x", hash[:12])
+	if SourceHelperName(p.Source) != want {
+		t.Fatal("source name digest mismatch")
+	}
+	replacement := p.Source
+	replacement.UID = "replacement"
+	if SourceHelperName(replacement) == want {
+		t.Fatal("UID not included in source name")
+	}
+	for _, phase := range []string{"Running", "Succeeded", "Failed"} {
+		t.Run(phase, func(t *testing.T) {
+			f := newFake(t, p)
+			obj := consumer(p.Source, phase, true)
+			metadata(obj)["name"] = want
+			metadata(obj)["uid"] = "orphan-uid"
+			metadata(obj)["annotations"] = map[string]any{ownerAnnotation: "foreign-or-previous-attempt"}
+			f.pods[p.Source.Namespace+"/"+want] = obj
+			if _, err := testExecutor(f, p).Execute(context.Background(), p); err == nil {
+				t.Fatal("orphan adopted")
+			}
+			if len(f.createdPods) != 0 || f.deletedPods != 0 || f.exports != 0 || metadata(f.pods[p.Source.Namespace+"/"+want])["uid"] != "orphan-uid" {
+				t.Fatal("orphan mutated or executed")
 			}
 		})
 	}
