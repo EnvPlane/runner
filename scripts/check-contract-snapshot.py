@@ -9,7 +9,7 @@ import subprocess
 import sys
 
 MODULE = "github.com/envplane/contracts"
-REPOSITORY = "https://github.com/EnvPlane/contracts.git"
+REPOSITORY = "https://github.com/envplane/contracts.git"
 ROOT = Path(__file__).resolve().parent.parent
 FIELDS = {"formatVersion", "version", "sourceCommit", "moduleSum", "goModSum", "openapiSha256"}
 
