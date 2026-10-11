@@ -215,7 +215,8 @@ test('publisher DAG gates every existing publishing step without privileged gate
   assert.match(gate, /ref: refs\/heads\/main/);
   assert.match(gate, /persist-credentials: false/);
   assert.match(gate, /retries: 0/);
-  assert.match(gate, /actions\/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd/);
+  // Dependabot may update the action; the gate must retain an immutable full SHA pin.
+  assert.match(gate, /^\s+uses: actions\/github-script@[a-f0-9]{40}(?:\s+#.*)?\s*$/m);
   assert.ok(!gate.includes('secrets.') && !gate.includes(': write'));
   assert.match(yaml, /  publish:\n    needs: required-go-ci\n    if: github.repository ==/);
   assert.match(yaml, /push: true/);
