@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
-  "version": "v0.1.123",
-  "sourceCommit": "327cb5fb219eaed03f7667bc58dac2a280fe3569",
-  "moduleSum": "h1:FlxcdjNxoUQGSmgLzSrv4lyhGETjGpmHwDL7N7QYtQA=",
-  "goModSum": "h1:U5l7epUrpJuTKck9KSMnnzLPln9D6SlG40xMzL+rL40=",
+  "version": "v0.1.124",
+  "sourceCommit": "bec0dbfaa6c826714a51a27997f3d43a58f5e3ff",
+  "moduleSum": "h1:otNnB1i8w+JwLbXy4fuwTN4RNz2BCxiyqFiVr7NLMe0=",
+  "goModSum": "h1:e6X8+NOQ+6cUsklorbRRqn1iD1alWTfKw2S9LRFWayw=",
   "openapiSha256": "3a74d7a9df6a479744bcac72f1ee97df596011aca830a7e3137ad67c24b219ac"
 }
