@@ -199,8 +199,8 @@ func (c runnerConfig) releasePlanAllowedKinds() []string {
 	}
 	return []string{
 		"ConfigMap", "CronJob", "CustomResourceDefinition", "DaemonSet", "Deployment",
-		"HelmDirect", "HelmDirectDeployment", "Ingress", "Job", "Kustomization", "Namespace", "NetworkPolicy",
-		"PersistentVolumeClaim", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount",
+		"HelmDirect", "HelmDirectDeployment", "Ingress", "Job", "Kustomization", "LimitRange", "Namespace", "NetworkPolicy",
+		"PersistentVolumeClaim", "ResourceQuota", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount",
 		"StatefulSet", "GitRepository",
 	}
 }
@@ -1184,6 +1184,11 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 		return result
 	case "render_release_plan":
 		result.ReleasePlanTransportVersion = domain.ReleasePlanTransportVersion
+		if !runnerHelmChartHostAllowed(runnerHelmChartRef(command, projectConfig), cfg.HelmAllowedChartHosts) {
+			result.ErrorCode = "helm_chart_host_not_allowlisted"
+			result.Error = "invalid chart reference: chart host is not allowlisted"
+			return result
+		}
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
 			result.Error = err.Error()
@@ -1223,7 +1228,16 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 			result.Error = "target Runner is not authorized for Helm release Secrets in namespace " + result.Namespace
 			return result
 		}
-		err = backend.Apply(ctx, command.Environment, projectConfig)
+		if platform, ok := backend.(interface {
+			ApplySignedPlatformRelease(context.Context, domain.Environment, domain.ProjectConfig, *domain.EnvironmentReleasePlan) error
+		}); ok {
+			err = platform.ApplySignedPlatformRelease(ctx, command.Environment, projectConfig, command.ReleasePlan)
+			if err == nil {
+				result.RenderedResources = orchestrator.HelmPlatformReadbackReceipt(command.ReleasePlan)
+			}
+		} else {
+			err = backend.Apply(ctx, command.Environment, projectConfig)
+		}
 	case "delete", "force_cleanup":
 		result.ReleaseName, result.Namespace, err = backend.DeploymentTarget(command.Environment, projectConfig)
 		if err != nil {
@@ -1259,6 +1273,19 @@ func executeRunnerCommandWithNamespaceGuard(ctx context.Context, cfg runnerConfi
 		}
 		var status domain.EnvironmentStatus
 		status, err = backend.Status(ctx, command.Environment, projectConfig)
+		if err == nil && status == domain.StatusReady {
+			if platform, ok := backend.(interface {
+				VerifySignedPlatformRelease(context.Context, domain.Environment, domain.ProjectConfig, *domain.EnvironmentReleasePlan) error
+			}); ok {
+				verifyErr := platform.VerifySignedPlatformRelease(ctx, command.Environment, projectConfig, command.ReleasePlan)
+				if verifyErr != nil {
+					status = domain.StatusFailed
+					result.Error = verifyErr.Error()
+				} else {
+					result.RenderedResources = orchestrator.HelmPlatformReadbackReceipt(command.ReleasePlan)
+				}
+			}
+		}
 		if err == nil {
 			result.EnvironmentStatus = string(status)
 		}
