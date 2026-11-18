@@ -641,7 +641,7 @@ func (b *HelmDirectBackend) Render(ctx context.Context, environment domain.Envir
 		}
 		executor, ok := b.helmExecutor.(helmPlatformExecutor)
 		if !ok {
-			return nil, errors.New("Runner cannot resolve Helm chart Services for compiled Ingress")
+			return nil, errors.New("cannot resolve Helm chart Services for compiled Ingress")
 		}
 		config := resolveHelmDirectConfig(projectConfig)
 		valuesPath, cleanup, err := b.helmValuesFile(environment)

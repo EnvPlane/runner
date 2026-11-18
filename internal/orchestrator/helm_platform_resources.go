@@ -206,7 +206,7 @@ func (b *HelmDirectBackend) ApplySignedPlatformRelease(ctx context.Context, env 
 	}
 	executor, ok := b.helmExecutor.(helmPlatformExecutor)
 	if !ok {
-		return errors.New("Runner cannot apply signed Helm platform resources")
+		return errors.New("cannot apply signed Helm platform resources with this executor")
 	}
 	releaseName, namespace, err := b.DeploymentTarget(env, config)
 	if err != nil {
@@ -214,7 +214,7 @@ func (b *HelmDirectBackend) ApplySignedPlatformRelease(ctx context.Context, env 
 	}
 	owned, err := b.helmExecutor.IsNamespaceManaged(ctx, namespace, env.Project, env.ID)
 	if err != nil || !owned {
-		return errors.New("Helm platform resources require an owned preview namespace")
+		return errors.New("owned preview namespace is required for Helm platform resources")
 	}
 	observed := make(map[string]map[string]any, len(resources))
 	for _, item := range resources {
@@ -247,7 +247,7 @@ func (b *HelmDirectBackend) ApplySignedPlatformRelease(ctx context.Context, env 
 		live, err := executor.GetPlatformResource(ctx, item.Kind, item.Namespace, item.Name)
 		if err != nil || !ownedPlatformResource(live, item, plan.PlanID) ||
 			!reflect.DeepEqual(platformMap(live, "spec"), observed[item.ResourceID]) {
-			return fmt.Errorf("Helm platform readback failed for %s/%s", item.Kind, item.Name)
+			return fmt.Errorf("readback failed for Helm platform %s/%s", item.Kind, item.Name)
 		}
 	}
 	return nil
@@ -262,7 +262,7 @@ func (b *HelmDirectBackend) VerifySignedPlatformRelease(ctx context.Context, env
 	}
 	executor, ok := b.helmExecutor.(helmPlatformExecutor)
 	if !ok {
-		return errors.New("Runner cannot verify signed Helm platform resources")
+		return errors.New("cannot verify signed Helm platform resources with this executor")
 	}
 	releaseName, namespace, err := b.DeploymentTarget(env, config)
 	if err != nil {
@@ -270,12 +270,12 @@ func (b *HelmDirectBackend) VerifySignedPlatformRelease(ctx context.Context, env
 	}
 	owned, err := b.helmExecutor.IsNamespaceManaged(ctx, namespace, env.Project, env.ID)
 	if err != nil || !owned {
-		return errors.New("Helm platform resources require an owned preview namespace")
+		return errors.New("owned preview namespace is required for Helm platform resources")
 	}
 	for _, item := range resources {
 		live, err := executor.GetPlatformResource(ctx, item.Kind, item.Namespace, item.Name)
 		if err != nil || !ownedPlatformResource(live, item, plan.PlanID) {
-			return fmt.Errorf("Helm platform readback failed for %s/%s", item.Kind, item.Name)
+			return fmt.Errorf("readback failed for Helm platform %s/%s", item.Kind, item.Name)
 		}
 		if item.Kind == "Ingress" {
 			if err := verifyPlatformIngressServices(ctx, executor, item, releaseName); err != nil {
@@ -362,7 +362,7 @@ func (e *CLIHelmExecutor) PutPlatformResource(ctx context.Context, item domain.R
 		}
 		version := platformString(platformMap(live, "metadata"), "resourceVersion")
 		if version == "" {
-			return nil, errors.New("Helm platform resource version is missing")
+			return nil, errors.New("missing Helm platform resource version")
 		}
 		meta["resourceVersion"] = version
 		operation = "replace"
