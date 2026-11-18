@@ -391,7 +391,8 @@ func namespaceOwnedByEnvironment(labels map[string]string, namespace, projectID,
 	if strings.TrimSpace(labels["envplane.io/managed-by"]) != "same-cluster-project-reconciler" || !projectMatches || environmentID == "" {
 		return false
 	}
-	return strings.TrimSpace(namespace) == "envplane-pr-"+environmentID
+	return (strings.TrimSpace(labels["envplane.io/environment-id"]) == "" || environmentMatches) &&
+		strings.TrimSpace(namespace) == "envplane-pr-"+environmentID
 }
 
 type kubernetesPodList struct {
@@ -615,19 +616,52 @@ type helmDirectManifest struct {
 }
 
 func (b *HelmDirectBackend) Render(ctx context.Context, environment domain.Environment, projectConfig domain.ProjectConfig) ([]Manifest, error) {
-	_ = b
-	_ = ctx
 	releaseMetadata, err := b.renderHelmDirectManifest(environment, projectConfig)
 	if err != nil {
 		return nil, err
 	}
-	return []Manifest{
+	manifests := []Manifest{
 		{
 			Path:    environment.ManifestFilename(),
 			Kind:    "HelmDirect",
 			Content: releaseMetadata,
 		},
-	}, nil
+	}
+	release, namespace, err := b.DeploymentTarget(environment, projectConfig)
+	if err != nil {
+		return nil, err
+	}
+	platform, err := renderHelmPlatformResources(environment, projectConfig, namespace)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range platform {
+		if item.Kind != "Ingress" {
+			continue
+		}
+		executor, ok := b.helmExecutor.(helmPlatformExecutor)
+		if !ok {
+			return nil, errors.New("cannot resolve Helm chart Services for compiled Ingress")
+		}
+		config := resolveHelmDirectConfig(projectConfig)
+		valuesPath, cleanup, err := b.helmValuesFile(environment)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = cleanup() }()
+		services, err := executor.TemplateServices(ctx, HelmUpgradeOptions{
+			ReleaseName: release, Namespace: namespace, ValuesFile: valuesPath,
+			ChartRef: b.chartRef(environment, config), ChartVersion: helmDirectChartVersion(config.chartRef, config.chartVersion),
+		})
+		if err != nil {
+			return nil, err
+		}
+		if err := bindPlatformIngress(platform, services, namespace); err != nil {
+			return nil, err
+		}
+		break
+	}
+	return append(manifests, platform...), nil
 }
 
 func (b *HelmDirectBackend) Apply(ctx context.Context, environment domain.Environment, projectConfig domain.ProjectConfig) error {
