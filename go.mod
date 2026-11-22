@@ -3,9 +3,9 @@ module github.com/envplane/runner
 go 1.26.11
 
 require (
-	github.com/envplane/contracts v0.1.124
+	github.com/envplane/contracts v0.1.125
 	github.com/envplane/gitops v0.1.4
-	github.com/jackc/pgx/v5 v5.12.0
+	github.com/jackc/pgx/v5 v5.13.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
